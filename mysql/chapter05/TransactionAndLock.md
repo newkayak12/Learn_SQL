@@ -157,6 +157,14 @@ innoDB는 트랜잭션 롤백에 대비해서 레코드를 undo에 백업해두�
 innoDB가 불필요하다고 판단하면 주기적으로 삭제한다. 
 
 이런 REPEATABLE READ에도 테이블에 INSERT 도중 `SELECT ... FOR UPDATE`로 조회하면 (두 번 사이 INSERT) 트랜잭션에서 수행한 변경 작업에 의해 레코드가
-보였다가 안 보였다하는 형상을 PHANTOM READ라고 한다. `SELECT ... FOR UPDATE`를 하면 언두에서 조회하는 것이 아니
+보였다가 안 보였다하는 형상을 PHANTOM READ라고 한다. `SELECT ... FOR UPDATE` [<sup>[1]</sup>](#selectForUpdate)를 하면 언두에서 조회하는 것이 아니
 
 ### SERIALIZABLE
+가장 단순한 격리수준이면서 가장 엄격한 격리 수준이다. 그만큼 동시 처리 능력도 떨어진다. 기본적으로 SELECT는 레코드 잠금 없이 진행된다. 하지만 `SERIALIZABLE`로
+실행하면 일기 작업도 공유 잠금을 획득해야만 하며, 동시에 다른 트랜잭션은 그러한 레코드를 변경하지 못하게 된다. 즉, 한 트랜잭션에서 읽고 쓰는 레코드를 다른 트랜잭션에서는 
+절대 접근할 수 없는 것이다. 그러면 "PHANTOM READ"가 발생하지 않는다. 하지만 innoDB는 갭락, 넥스트 키 락 때문에 REPEATABLE READ로도 "PHANTOM READ"가 
+없기 떄문에 굳이 SERIALIZABLE을 사용할 필요가 없다.
+
+
+-----------------
+<a name="selectForUpdate">[1]</a> : ELECT FOR UPDATE문을 실행하면 LOCK을 획득하고, 해당 세션이 UPDATE 쿼리 후 COMMIT하기 전까지는 다른 세션들이 해당 ROW를 수정하지 못하도록 하는 기능이다.
