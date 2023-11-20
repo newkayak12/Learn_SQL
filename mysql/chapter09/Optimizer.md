@@ -230,3 +230,24 @@ MySQL 엔진이 스토리지 엔진으로부터 받아온 레코드를 정렬하
 기존 MEMORY 엔진은 VARBINARY, VARCHAR 같은 가변 길이 타입을 지원하지 못해서 메모리가 낭비됐고, MyISAM은 트랜잭션 지원을 못했다. 그래서 8.0부터
 TempTable 엔진이 도입됐다. `internal_tmp_mem_storage_engine` 시스템 변수로 메모리용 임시 테이블을 MEMORY와 TempTable 중 선택할 수 있다. 기본 값은
 TempTable이다. `temptable_max_ram`으로 최대 사용 크기를 지정할 수 있다.
+
+지정된 값보다 커지면 메모리의 임시 테이블을 디스크로 기록하는데
+
+1. MMAP 파일로 저장
+2. innoDB 테이블로 기록
+
+#### 임시 테이블이 필요한 쿼리
+아래의 패턴과 같은 쿼리는 별도 데이터 가공이 필요하므로 임시테이블을 생성한다.
+
+- ORDER BY와 GROUP BY가 명시된 컬럼이 다른 쿼리
+- ORDER BY나 GROUP BY가 명시된 컬럼이 조인의 순서상 첫 번째 테이블이 아닌 쿼리
+- DISTINCT, ORDER BY가 동시에 존재하는 경우 DISTINCT가 인덱스로 처리되지 못하는 쿼리 
+- UNION, UNION DISTINCT가 사용된 쿼리
+- 쿼리 실행 계획에서 select_type이 DERIVED인 쿼리
+
+#### 임시 테이블이 디스크에 생성되는 쿼리
+
+- UNION이나 UNION ALL에서 SELECT 되는 컬럼 중에서 길이가 512 바이트 이상인 크기의 컬럼이 있는 경우
+- GROUP BY, DISTINCT 컬럼에서 512 바이트 이상인 크기의 컬럼이 있는 경우
+- 메모리 임시 테이블의 크기가 `tmp_table_size` 또는 `max_heap_table_size`보다 크거나 `temptable_max_ram`보다 큰 경우
+
