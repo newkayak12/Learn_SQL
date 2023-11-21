@@ -251,3 +251,55 @@ TempTable이다. `temptable_max_ram`으로 최대 사용 크기를 지정할 수
 - GROUP BY, DISTINCT 컬럼에서 512 바이트 이상인 크기의 컬럼이 있는 경우
 - 메모리 임시 테이블의 크기가 `tmp_table_size` 또는 `max_heap_table_size`보다 크거나 `temptable_max_ram`보다 큰 경우
 
+
+## 쿼리 힌트
+
+### USE INDEX/ FORCE INDEX/ IGNORE INDEX
+인덱스 힌트는 사용하려는 인덱스를 가지는 테이블 뒤에 힌트를 명시해야 한다. 인덱스 힌트는 크게 3종류가 있다. 3종류의 인덱스 힌트 모두 키워드
+뒤에 사용할 인덱스의 이름을 괄호를 묶어 사용하며, 괄호 안에 아무 것도 없거나 존재하지 않는 인덱스 이름을 사용할 경우에는 쿼리 문법 오류로 처리된다. 
+
+ - USE INDEX: 가장 자주 사용되는 인덱스 힌트, MySQL 옵티마이저에게 특정 테이블 인덱스를 사용하도록 권장하는 힌트 정도다. 대부분 사용자의 힌트를 채택하지만 항상은 아니다.
+ - FORCE INDEX: USE INDEX와 유사하며 더 강한 힌트다. 그러나 USE INDEX를 사용해도 사용하지 않는다면 FORCE도 비슷한 결과가 나온다. 
+ - IGNORE INDEX: USE INDEX, FORCE INDEX와는 반대로 특정 인덱스를 사용하지 못하게 하는 용도로 사용하는 힌트다. 
+
+위 힌트 모두 용도를 명시할 수 있는데, 선택 사항이며, 명시되어 있지 않으면 주어진 인덱스를 아래 3가지 용도로 사용한다. 
+
+ - USE INDEX FOR JOIN : JOIN 키워드는 테이블, 레코드를 검색하기 위한 용도까지 포함하는 용어다. 
+ - USE INDEX FOR ORDER BY : ORDER BY 용도로만 사용하도록 제한한다. 
+ - USE INDEX FOR GROUP BY : GROUP BY 용도로만 사용하도록 제한한다. 
+
+``````mysql
+SELECT * FROM employees FOR INDEX(primary) where emp_no = 10001;
+``````
+
+
+### SQL_CALC_FOUND_ROWS
+LIMIT을 사용하면 조건을 만족하는 레코드가 LIMIT에 명시된 수보다 더 많다고 하더라도 LIMIT에 명시된 수만큼 만족하는 레코드를 찾으면 멈춘다. 
+하지만 `SQL_CALC_FOUND_ROWS` 힌트가 포함된 쿼리의 경우에는 LIMIT을 만족하더라도 끝까지 검색을 수행한다. 그 이후 `FOUND_ROWS()`라는 함수를 사용하면
+전체 레코드 수를 알 수 있다.
+
+```mysql
+SELECT SQL_CALC_FOUND_ROWS  * FROM employees LIMIT 5;
+SELECT FOUND_ROWS() AS total_record_count;
+```
+
+페이징에 응용할 것을 고려한다면 정답은 아니다. 똑같이 쿼리가 두 번 실행한다. 오히려 쪼개서 던지는 게 인덱스를 레인지 스캔해서 더 빠르다. 
+
+
+### 옵티마이저 힌트 
+#### 종류
+ - 인덱스: 특정 인덱스의 이름을 사용할 수 있는 옵티마이저 힌트
+ - 테이블: 특정 테이블의 이름을 사용할 수 있는 ~
+ - 쿼리 블록 : 특정 쿼리 블록을 사용할 수 있는 옵티마이저 힌트, 특정 쿼리 블록의 이름을 명시하는 것이 아니라, 힌트가 명시된 쿼리 블록에 대해서만 영향을 미치는 옵티마이저 힌트
+ - 글로벌(쿼리 전체) : 전체 쿼리에 대해서 영향을 미치는 힌트
+
+절대적이지는 않다. 
+
+- MAX_EXECUTION_TIME : 쿼리가 지정한 시간을 넘기면 실패하게 된다.
+- SET_VAR : 시스템 변수 쿼리 옵티마이저 힌트로 제어한다. 조인버퍼를 조절하거나 소트 버퍼를 조정하는 식으로 사용할 수 있다. 하지만 모든 변수가 조정 가능하지는 않다.
+```mysql
+EXPLAIN 
+SELECT /*+ SET_VAR (optimizier_switch='index_merge_intersection=off') */ *
+FROM employees
+WHERE first_name = "Georgi" AND emp_no BETWEEN 10000 AND 20000;
+```
