@@ -305,3 +305,148 @@ SELECT * FROM cte;
 ```
 
 ### 윈도우 함수(WINDOW FUNCTION)
+현재 레코드를 기준으로 연관된 레코드 집합의 연산을 수행한다. 집계함수는  주어진 그룹별로 하나의 레코드로 묶어서 출력하지만 윈도우 함수는 조건에 일치하는 레코드
+건수는 변하지 않고 그대로 유지한다. 풀어서 말하면 GROUP BY는 집계 함수를 사용하면 결과 집합의 모양이 바뀐다. 그에 반해 윈도우 함수는 결과 집합을 그대로
+유지하면서 하나의 레코드 연산에 다른 레코드의 컬럼 값을 참조할 수 있다.
+
+### 윈도우 함수 기본 사용법
+
+```sql
+AGGREGATE_FUNC () OVER (<partition> <order>) AS window_func_column
+
+SELECT e.*,
+RANK() OVER (ORDER BY e.hire_date) AS hire_date_rank
+FROM employees e;
+
++--------+------------+------------+--------------+--------+------------+----------------+
+| emp_no | birth_date | first_name | last_name    | gender | hire_date  | hire_date_rank |
++--------+------------+------------+--------------+--------+------------+----------------+
+| 110022 | 1956-09-12 | Margareta  | Markovitch   | M      | 1985-01-01 |              1 |
+| 110085 | 1959-10-28 | Ebru       | Alpin        | M      | 1985-01-01 |              1 |
+| 110183 | 1953-06-24 | Shirish    | Ossenbruggen | F      | 1985-01-01 |              1 |
+| 110303 | 1956-06-08 | Krassimir  | Wegerle      | F      | 1985-01-01 |              1 |
+                                    ........
+
+
+SELECT e.*, 
+    RANK() OVER ( PARTITION BY de.dept_no ORDER BY e.hire_date) AS hire_date_rank
+FROM employees e  
+JOIN dept_emp de ON de.emp_no = e.emp_no  
+ORDER BY de.dept_no, e.hire_date;
+
+
++--------+------------+------------+------------+--------+------------+----------------+
+| emp_no | birth_date | first_name | last_name  | gender | hire_date  | hire_date_rank |
++--------+------------+------------+------------+--------+------------+----------------+
+| 110022 | 1956-09-12 | Margareta  | Markovitch | M      | 1985-01-01 |              1 |
+|  51773 | 1963-06-08 | Eric       | Piazza     | M      | 1985-02-02 |              2 |
+|  95867 | 1955-05-06 | Shakhar    | Meszaros   | F      | 1985-02-02 |              2 |
+|  98351 | 1962-01-28 | Florina    | Setia      | M      | 1985-02-02 |              2 |
+                                        .....
+
+```
+
+윈도우 함수의 각 파티션 안에서도 연산 대상 레코드별로 연산을 수행할 소그룸이 사용되는데, 이를 프레임이라고 한다. 윈도우 함수에서 프레임을 명시적으로 지정하지
+않아도 MySQL은 상황에 맞게 프레임을 묵시적으로 선택한다. 
+
+```sql
+AGGREGATE_FUNC () OVER (<partition> <order>) AS window_func_column
+
+frame:
+    {ROWS | RANGE} {frame_start | frame_between}
+frame_between:
+    BETWEEN frame_start AND frame_end
+```
+프레임을 만드는 기준으로 ROWS, RANGE 중 하나를 선택할 수 있다. 
+- ROWS : 레코드의 위치를 기준으로 프레임을 생성
+- RANGE : ORDER BY에 명시된 컬럼의 값의 범위로 프레임 생성
+
+프레임 시작과 끝을 의미하는 키워드의 의미는 아래와 같다. 
+- CURRENT ROW: 현재 레코드
+- UNBOUNDED PRECEDING: 파티션의 첫 번째 레코드
+- UNBOUNDED FOLLOWING: 파티션의 마지막 레코드
+- expr PRECEDING: 현재 레코드로부터 n번째 이전 레코드 
+- expr FOLLOWING: 현재 레코드로부터 n번째 이후 레코드 
+
+```
+SELECT emp_no, from_date, salary,
+
+--> // 현재 레코드의 from_date를 기준으로 1년 전부터 지금까지 급여 중 최소 급여
+MIN(salary) OVER(ORDER BY from_date RANGE INTERVAL 1 YEAR PRECEDING) AS min_1,
+
+--> // 현재 레코드의 from_date를 기준으로 1년 전부터 2년 후까지의 급여 중 최대 급여
+MAX(salary) OVER(ORDER BY from_date RANGE BETWEEN INTERVAL 1 YEAR PRECEDING AND INTERVAL 2 YEAR FOLLOWING) AS max_1,
+
+--> // from_date 칼럼으로 정렬 후, 첫 번째 레코드부터 현재 레코드까지의 평균
+AVG(salary) OVER(ORDER BY from_date ROWS UNBOUNDED PRECEDING) AS avg_1,
+
+--> // from_date 칼럼으로 정렬 후, 현재 레코드를 기준으로 이전 건부터 이후 레코드까지의 급여 평균
+AVG(salary) OVER(ORDER BY from_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS avg_2
+
+FROM salaries WHERE emp_no=10001
+```
+
+### 윈도우 함수
+|                                         |                                         |
+|:---------------------------------------:|:----------------------------------------|
+|                  AVG()                  | 평균 값 반환                                 |
+|                BIT_AND()                | AND 비트 연산 결과 반환                         |
+|                BIT_OR()                 | OR 비트 연산                                |
+|                BIT_XOR()                | XOR 비트 연산                               |
+|                 COUNT()                 | 건수                                      |
+|             JSON_ARRAYAGG()             | 결과를 JSON ARRAY로                         |
+|            JSON_OBJECTAGG()             | 결과를 JSON OBJECT로                        |
+|                  MAX()                  | 최댓값                                     |
+|                  MIN()                  | 최소값                                     |
+| STDDEV_POP(),<br/> STDDEV(),<br/> STD() | 표준 편차값                                  |
+|              STDDEV_SAMP()              | 표본 표준 편차 값                              |
+|                  SUM()                  | 합계 값 반환                                 |
+|          VAR_POP(), VARIANCE()          | 표준 분산 값 반환                              |
+|               VAR_SAMP()                | 표준 분산 값 반환                              |
+|               CUME_DIST()               | 누적 분포 값 반환                              |
+|              DENSE_RANK()               | 랭킹 값 반환(GAP X)                          |
+|              FIRST_VALUE()              | 파티션의 첫 번째 레코드 값 반환                      |
+|                  LAG()                  | 파티션 내에서 파라미터(N)을 이용해서 N 번째 이후 레코드 값 반환  |
+|              LAST_VALUE()               | 파티션의 마지막 레코드 값 반환                       |
+|                 LEAD()                  | 파티션 내에서 파라미터 (N)을 이용해서 N 번쨰 이후 레코드 값 반환 |
+|               NTH_VALUE()               | 파티션 N 번째 값 반환                           |
+|                 NTILE()                 | 파티션별 전체 건수를 파라미터로 N 등분한 값 반환            |
+|             PERCENT_RANK()              | 퍼센트 랭킹 값 반환                             |
+|                 RANK()                  | 랭킹값 반환(GAP O)                           |
+|              ROW_NUMBER()               | 파티션의 레코드 순번 반환                          |
+
+
+## 잠금을 사용하는 SELECT
+innoDB는 기본적으로 SELECT는 잠금을 하지 않는다. 이를 `Non Locking Consistent Read`라고 한다. 하지만 SELECT 쿼리를 이용해서 읽는 값을 애플리케이션에서
+가공해서 업데이트하고자 하면 다른 트랜잭션이 컬럼 값 변경을 하지 못하도록 막아야 한다. 옵션으로  `FOR SHARE`, `FOR UPDATE`를 사용하면 된다.
+`FOR SAHRE` 은 읽은 레코드에 읽기 잠금을 걸고 `FOR UPDATE`는 쓰기 잠금을 건다. 
+
+## 잠금 테이블 선택
+```sql
+SELECT *
+FROM employees e 
+JOIN dept_emp de on e.emp_no = de.emp_no
+JOIN departments d on de.dept_no = d.dept_no
+FOR UPDATE;
+```
+이러면 3개 테이블에서 읽은 레코드에 모두 쓰기 잠금(Exclusive Lock)을 건다. 
+
+## NOWAIT & SKIP LOCKED
+8.0부터 추가됐다. 지금까지 MySQL 잠금은 레코드를 잠그고 있으면 트랜잭션은 그 잠금이 해제될 때까지 기다렸다. 최악의 경우 timeout으로 에러를 받을 수도 있었다. 
+NOWAIT을 주면 `Statement aborted because lock(s) could not be acquired immediately and NOWAIT is set.`이라는 문구와 함께 에러를
+낸다. 
+
+SKIP LOCK은 에러 반환 없이 잠긴 레코드를 무시하고 잠금이 안걸린 레코드만 반환한다.
+```sql
+SELECT * FROM salaries
+WHERE  emp_no = 10001 FOR UPDATE SKIP LOCKED;
+```
+
+
+## INSERT
+### INSERT IGNORE
+`INSERT IGNORE`은 PK, UNIQUE가 존재해서 중복되는 경우, 테이블과 레코드 컬럼이 호환되지 않는 경우 모두 무시하고 다음 레코드를 처리할 수 있게 해준다. 
+BULK INSERT에서 유용하다.
+
+### INSERT ... ON DUPLICATE KEY UPDATE
+`INSERT ... ON DUPLICATE KEY UPDATE`는 PK, UNIQUE 중복이 발생하면 UPDATE를 하게 해준다. 
