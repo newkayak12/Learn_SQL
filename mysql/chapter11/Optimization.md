@@ -465,3 +465,343 @@ RDBMS에서 데이터를 빠르게 적재할 수 있는 방법으로 `LOAD DATA`
 
 ### 성능을 위한 테이블 구조
 INSERT는 테이블 구조에 의해서 성능이 많이 결정된다. INSERT는 단일 레코드를 저장하는 형태로 사용하기 떄문에 INSERT 자체의 튜닝여지는 적은 편이다.
+그래도 노력하자면 
+
+1. INSERT 할 값을 PK 기준으로 정렬해서 INSERT 하는 것이 도움이 될 수 있다.
+2. PK 선정에 심혈을 기울인다. ( PK가 B-Tree 전체에 메모리가 적재돼 있어야 빠른 INSERT가 보장된다.)
+추가적으로 innoDB 스토리지 엔진은 PK가 클러스터링 키가 기본이다. 이는 INSERT, SELECT 성능 둘 다 잡으면서 PK 설계하기 어렵다는 것을 의미하기도 한다. 
+대부분 SELECT 비중이 높기 때문에 SELECT에 맞춰서 설계하는 게 옳다. 
+3. Auto-Increment 를 사용하면 클러스터링 효과를 받지 않도록 할 수 있다. 이런 방법으로 INSERT에 알맞도록 설정할 수도 있다. 
+   - 단조 증가, 단조 감소 값으로 PK 설정
+   - 세컨더리 인덱스 최소화
+추가로 채번을 위해서  `AUTO-INC`라는 잠금을 건다. 잠금 방식을 변경할 수 있도록 `innodb_autoinc_lock_mode`를 제공한다.
+   - innodb_autoinc_lock_mode = 0 : 항상 AUTO_INC를 걸고 한 번에 1씩만 증가된 값을 가져온다.  (5.1)
+   - innodb_autoinc_lock_mode = 1 (Consecutive mode) : 단순히 INSERT하는 쿼리에서 `AUTO_INC`를 사용하지 않고 뮤텍스로 처리한다. 
+   - innodb_autoinc_lock_mode = 2 (Interleaved mode) : LOAD DATA나 벌크 INSERT를 포함한 INSERT 계열의 문장을 실행할 때 `AUTO_INC`를 사용하지 않는다. 이때 자동 증가 값을 적당히 미리 받아 처리할 수 있으므로 가장 빠르다.
+이 모드에서 채번된 번호는 단조 증가하는 유니크한 번호까지만 보장하며, INSERㅅT 순서와 채번된 번호의 연속성을 보장하지는 않는다. `SBR, Statement Base Replication`을 사용하면 소스, 레플리카 간 AUTO_INC 동기화를 보장하지 못한다. 
+
+
+## UPDATE, DELETE
+보통 하나의 테이블에 대해서 한 건 또는 여러 건의 레코드를 변경/삭제하기 위해서 사용한다. 하지만 MySQL에서는 여러 테이블을 조인해서 한 개 이상의 테이블 레코드를
+변경하거나 삭제하는 기능도 제공한다. `JOIN UPDATE`, `JOIN DELETE`이 그 예이다. 
+
+### UPDATE ... ORDER BY ... LIMIT n
+UPDATE< DELETE는 WHERE을 걸어서 처리하는 것이 일반적이지만 ORDER BY, LIMIT을 걸어서 특정 컬럼으로 정렬해서 변경, 삭제하는 것도 가능하다. 그러나 
+한 번에 너무 많은 양을 처리하면 문제가 될 수 있다. 
+
+```sql
+DELETE FROM employees
+ORDER BY last_name LIMIT 10;
+```
+### JOIN UPDATE
+두 개이 이상의 테이블을 조인해서 조인된 결과 레코드를 변경/ 삭제하는 쿼리를 JOIN UPDATE라고 한다. 조인된 테이블 중에서 특정 테이블의 컬럼 값을 다른 테이블의
+컬럼에 업데이트 해야 할 때 주로 조인 업데이트를 사용한다.
+
+일반적으로 JOIN UPDATE는 조인되는 모든 테이블에 대해서 읽기 참조만 되는 테이블은 읽기 잠금이 걸리고, 컬럼이 변경되는 곳은 쓰기 잠금이 걸린다. 그래서 JOIN UPDATE
+는 데드락을 유발할 수도 있다. 
+
+```sql
+UPDATE tb_test1 t1, employees e 
+SET t1.first_name = e.first_name
+WHERE e.emp_no = t1.emp_no;
+```
+JOIN UPDATE도 JOIN 이기에 순서에 따라서 성능이 달라질 수 있다. 
+
+### 여러 레코드 UPDATE
+8.0부터는 레코드 생성(Row Constructor)로 레코드별로 서로 다른 값을 업데이트할 수 있게 됐다. 
+
+### JOIN DELETE
+
+```sql
+DELETE e
+FROM employees e, dept_emp de, departments d
+WHERE e.emp_no = de.emp_no AND de.dept_no = d.dept_no AND d.dept_no=`d001`;
+```
+
+
+## DDL
+8.0에는 스키마를 변경하는 작업 도중에도 다른 커넥션에서 해당 테이블의 데이터를 변경하거나 조회하는 작업을 가능하게 해준다. `old_alter_table`로 온라인 DDL로 작동할지
+아니면 읽기/쓰기를 막고 스키마를 변경하게 할지 고를 수 있다. 8.0에는 기본 값은 OFF라서 온라인 DDL이 켜져 있다. 온라인 DDL이 켜져 있고, ALTER TABLE을
+하면
+
+1. ALGORITHM=INSTANT로 스키마 변경 가능 여부 확인 후, 가능하면 선택
+2. ALGORITHM=INPLACE로 스키머 변경 가능 여부 확인 후, 가능하면 선택
+3. ALGORITHM=COPY 알고리즘 선택
+
+순으로 적합한 알고리즘을 찾는다. 
+
+- INSTANT : 테이블의 데이터는 변경하지 안혹 메타 데이터만 변경하고 작업을 완료한다.  걸리는 시간은 레코드 건수와 무관하다.  스키마 변경 도중 읽고 쓰기는 대기하게 되지만 무시할 수준이다.
+- INPLACE : 임시테이블로 데이터를 복사하지 않고 스키마를 변경한다. 내부적으로 테이블의 리빌드를 실행할 수도 있다. 레코드 복사는 없지만 모든 레코드를 리빌드해야 하기 때문에 테이블 크기에 따라 많은 시간이 걸릴 수 있다. 그러나 스키마 변경 중에도 읽고 쓰기가 된다. 최초, 마지막에만 불가능하다.
+- COPY : 변경된 스키마를 적용한 임시 테이블을 생성하고, 테이블의 레코드를 모두 임시 테이블로 복사하고 최종적으로 임시 테이블을 RENAME해서 스키마 변경을 완료한다. 진행되는 도중 읽기만 가능하고 DML은 불가능하다.
+
+INPLACE, COPY라면 LOCK 옵션을 명시할 수 있다.
+- NONE : 아무런 잠금 걸지 않음
+- SHARED: 읽기 잠금을 걸고 스키마 변경을 실행하기 때문에 스키마 변경 중 읽기는 가능하지만 쓰기는 불가능함
+- EXCLUSIVE: 쓰기 잠금을 걸고 스키마 변경을 실행하기에 테이블의 읽고 쓰기가 불가능하다. 
+
+```sql
+ALTER TABLE salaries CHANGE to_date end_date DATE NOT NULL,
+ALGORITHM = INPLACE, LOCK = NONE; 
+```
+INPLACE로 진행하면 NONE으로 LOCK은 가능하지만, 가끔 `SHARED`까지 설정해야 할 수도 있다. EXCLUSIVE는 전통적 ALTER TABLE과 동일하므로 LOCK을 명시할 필요가 없다.
+만일 리빌드가 필요하면 (PK를 추가하는 작업같은 경우) 레코드 저장위치가 바뀌어야 하기 때문에 테이플 리빌드가 필요한 반면, 단순히 컬럼 이름 변경은 INPLACE를 사용해도
+리빌드가 필요가 없다. 리빌드가 필요한 경우를 `Reorganizing` 혹은 `Table Rebuild 라고 한다.
+
+<a href="https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html"> 온라인 DDL 지원 표 확인 </a>
+
+### INPLACE 알고리즘
+INPLACE가 임시 테이블로 레코드 복사를 하지 않더라도 내부적으로 테이블의 모든 레코드를 리빌드해야 하는 경우가 많다.
+```
+1. INPLACE 스키마 변경이 지원되는 스토리지 엔진의 테이블인지 확인
+2. INPLACE 스키마 변경 준비( 변경 정보 준비해서 변경 중 바뀌는 데이터 추적 준비)
+3. 테이블 스키마 변경 및 새로운 DML 로깅
+4. 로그 적용
+5. INPLACE 스키마 변경 완료
+```
+
+2, 4 단계에서는 배타적 잠금(Exclusive Lock)이 필요하다. 이 시점에는 DML이 대기한다. 3번에서는 대기 없이 처리된다. 그리고 INPLACE 알고리즘으로 온라인 스키마
+변경 진행되는 동안 새로 유입된 DML의 쿼리들에는 온라인 변경 로그라는 메모리 공간을 쌓아뒀다가 온라인 스키마 변경이 완료되면 로그 내용을 실제 테이블로 일괄 적용한다.
+`innodb_online_alter_log_max_size`로 이 메모리 크기가 결정된다. 
+
+
+### 온라인 DDL 모니터링
+온라인 DDL을 포함한 모든 ALTER는 `performance_schema`를 통해서 진행 상황을 모니터링할 수 있다. `performance_schema`를 이용해서 ALTER TABLE을 모니터링하려면
+performance_schema 옵션 (Instrument, Consumer)을 활성화해야 한다.
+
+```sql
+SET GLOBAL performance_schema = ON;
+
+UPDATE performance_schema.setup_instruments
+SET ENABLED = 'YES', TIMED = 'YES'
+WHERE NAME LIKE 'stage/innodb/alter%';
+
+UPDATE performance_schema.setup_consumers
+SET ENABLED = 'YES'
+WHERE NAME LIKE '%stages%';
+```
+
+
+## 데이터베이스 변경
+MySQL은 스키마와 데이터베이스를 구분하지 않는다. 동격의 개념이다. 그래서 MySQL은 굳이 스키마를 명시적으로 사용하지 않는다. MySQL의 데이터베이스는 디스크의 물리적인
+저장소를 구분하지만 여러 데이터베이스의 테이블을 묶어서 조인쿼리를 사용할 수도 있기 때문에 단순히 논리적인 개념이기도 하다.
+
+```sql
+-- 생성
+CREATE DATABASE  [IF NOT EXIST] employees;
+CREATE DATABASE employees CHARACTER SET utf8mb4;
+CREATE DATABASE employees CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
+-- 조회
+SHOW DATABASES;
+
+-- 선택
+USER employees;
+
+-- 속성 변경
+ALTER DATABASE employees CHARACTER SET = 'euckr' COLLATE = euckr_korean_ci;
+
+-- 삭제
+DROP DATABASE [IF EXISTS] employees;
+```
+
+## 테이블 스페이스 변경
+MySQL은 전통적으로 테이블 별로 전용의 테이블 스페이스를 사용했다. 8.0부터는 MySQL 서버에도 사용자 테이블을 제너럴 테이블 스페이스(스토리지 엔진의 시스템 테이블 스페이스)
+로 저장하는 기능이 추가되고, 테이블 스페이스를 관리하는 DDL이 추가됐다. 그러나 제너럴 테이블 스페이스에는 여러 제약 사항을 가진다.  
+
+- 파티션 테이블은 제너럴 테이블스페이스를 사용하지 못한다.
+- 복제 소스와 레플리카 서버가 동일 호스트에서 실행하는 경우 ADD DATAFILE은 불가
+- 테이블 암호화(TDE)는 테이블 스페이스 단위로 설정됨
+- 테이블 압축 기능 여부는 테이블 스페이스의 블록 사이즈와 innoDB 페이지 사이즈에 의해서 결정된다.
+- 특정 테이블을 삭제하고 (DROP TABLE)해도 운영체제로 바로 반납되지 않는다.
+
+그러나 아래와 같은 장점이 있다.
+- 제너럴 테이블 스페이스를 사용하면 파일 핸들러(Open file descriptor) 최소화
+- 테이블 스페이스 관리에 필요한 메모리 공간을 최소화
+
+## 테이블 생성
+
+```sql
+CREATE [TEMPORARY] TABLE [IF NOT EXISTS] tb_test ( 
+    
+    member_id BIGINT [UNSIGNED] [AUTO_INCREMENT],
+    nickname CHAR(20) [CHARACTER SET 'utf8'] [COLLATE 'utf8_general_ci'] [NOT NULL],
+    home_url VARCHAR(200) [COLLATE 'latin1_general_cs'],
+    birth_year SMALLINT [(4)] [UNSIGNED] [ZEROFILL],
+    member_point INT [NOT NULL] [DEFAULT 0],
+    registered_dttm DATETIME [NOT NULL],
+    modified_ts TIMESTAMP [NOT NULL] [DEFAULT CURRENT_TIMESTAMP],
+    gender ENUM('Female','Male') [NOT NULL], 
+    hobby SET('Reading','Game','Sports'),
+    profile TEXT [NOT NULL],
+    session_data BLOB, PRIMARY KEY (member_id),
+    
+    UNIQUE INDEX ux_nickname (nickname),
+    INDEX ix_registereddttm (registered_dttm)
+    
+ ) ENGINE=INNODB;
+```
+
+### 테이블 구조 조회
+```sql
+SHOW CREATE TABLE employees;
+
+CREATE TABLE `employees` (
+                            `emp_no` int NOT NULL,
+                            `birth_date` date NOT NULL,
+                            `first_name` varchar(14) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                            `last_name` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                            `gender` enum('M','F') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+                            `hire_date` date NOT NULL,
+                            PRIMARY KEY (`emp_no`),
+                            KEY `ix_hiredate` (`hire_date`),
+                            KEY `ix_gender_birthdate` (`gender`,`birth_date`),
+                            KEY `ix_firstname` (`first_name`)
+                         
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci STATS_PERSISTENT=0
+```
+
+### 테이블 구조 변경 
+```sql
+ALTER TABLE employees
+CONVERT TO 
+    CHARACTER SET UTF8MB4 COLLATE utf8mb4_general_ci,
+    ALGORITHM=INPLACE , LOCK=NONE;
+```
+### 테이블 명 변경
+```sql
+RENAME TABLE table1 TO table2;
+```
+### 테이블 상태 조회
+MySQL의 모든 테이블은 만들어진 시간, 대략의 레코드 건수, 데이터 파일의 크기 등의 정보를 가지고 있다.또한 데이터 파일의 버전, 레코드 포맷 등의 중요한 정보도
+가지고 있다.
+
+```sql
+SHOW TABLE STATUS LIKE 'employees';
+
++-----------+--------+---------+------------+--------+----------------+-------------+-----------------+--------------+-----------+----------------+---------------------+-------------+------------+--------------------+----------+--------------------+---------+
+| Name      | Engine | Version | Row_format | Rows   | Avg_row_length | Data_length | Max_data_length | Index_length | Data_free | Auto_increment | Create_time         | Update_time | Check_time | Collation          | Checksum | Create_options     | Comment |
++-----------+--------+---------+------------+--------+----------------+-------------+-----------------+--------------+-----------+----------------+---------------------+-------------+------------+--------------------+----------+--------------------+---------+
+| employees | InnoDB |      10 | Dynamic    | 300141 |             50 |    15220736 |               0 |     22593536 |   4194304 |           NULL | 2023-11-04 09:44:16 | NULL        | NULL       | utf8mb4_general_ci |     NULL | stats_persistent=0 |         |
++-----------+--------+---------+------------+--------+----------------+-------------+-----------------+--------------+-----------+----------------+---------------------+-------------+------------+--------------------+----------+--------------------+---------+
+1 row in set (0.02 sec)
+
+```
+
+### 테이블 구조 복사
+```sql
+CREATE TABLE temp_employees LIKE employees;
+
+INSERT INTO temp_employees SELECT * FROM employees;
+```
+
+### 테이블 삭제 
+```sql
+DROP TABLE [ IF EXISTS ] table1;
+```
+테이블 삭제에서 유의해야 할 것은 어댑티브 해시 인덱스(Adaptive hash index)이다. innoDB 버퍼 풀의 각 페이지가 가진 레코드에 대한 해시 인덱스를 제공하는데,
+어댑티브 해시 인덱스가 활성화돼 있는 경우 테이블이 삭제되면 어댑티브 해시 인덱스 정보도 모두 삭제해야 한다.
+
+### 인덱스 변경
+```sql
+ALTER TABLE employees ADD PRIMARY KEY (emp_no)
+ALGORITHM = INPLACE, LOCK = NONE;
+
+ALTER TABLE employees ADD UNIQUE INDEX ux_empno (emp_no),
+ALGORITHM = INPLACE, LOCK = NONE;
+
+ALTER TABLE employees ADD INDEX ix_lastname (last_name),
+ALGORITHM = INPLACE, LOCK = NONE;
+
+ALTER TABLE employees ADD FULLTEXT INDEX fx_firstname_lastname (first_name, last_name)
+ALGORITHM = INPLACE, LOCK = SHARED;
+
+ALTER TABLE employees ADD SPATIAL INDEX fx_loc ( last_location ),
+ALGORITHM = INPLACE, LOCK = SHARED;
+```
+
+### 인덱스 조회
+```sql
+SHOW INDEX FROM employees;
++-----------+------------+---------------------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+---------+------------+
+| Table     | Non_unique | Key_name            | Seq_in_index | Column_name | Collation | Cardinality | Sub_part | Packed | Null | Index_type | Comment | Index_comment | Visible | Expression |
++-----------+------------+---------------------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+---------+------------+
+| employees |          0 | PRIMARY             |            1 | emp_no      | A         |      300141 |     NULL |   NULL |      | BTREE      |         |               | YES     | NULL       |
+| employees |          1 | ix_hiredate         |            1 | hire_date   | A         |        4156 |     NULL |   NULL |      | BTREE      |         |               | YES     | NULL       |
+| employees |          1 | ix_gender_birthdate |            1 | gender      | A         |           5 |     NULL |   NULL |      | BTREE      |         |               | YES     | NULL       |
+| employees |          1 | ix_gender_birthdate |            2 | birth_date  | A         |        8669 |     NULL |   NULL |      | BTREE      |         |               | YES     | NULL       |
+| employees |          1 | ix_firstname        |            1 | first_name  | A         |        1309 |     NULL |   NULL |      | BTREE      |         |               | YES     | NULL       |
++-----------+------------+---------------------+--------------+-------------+-----------+-------------+----------+--------+------+------------+---------+---------------+---------+------------+
+5 rows in set (0.03 sec)
+```
+
+### 인덱스 이름 변경
+```sql
+ALTER TABLE salaries RENAME INDEX ix_salary TO ix_salary2,
+ALGORITHM = INPLACE, LOCK = NONE;
+```
+
+### 인덱스 가시성 변경
+인덱스를 만드는 건 비용이 적으나 지우는 건 비용이 크게 든다. 그래서 8.0부터는 쿼리를 실행할 때 해당 인덱스를 무효화할지 아닐지를 결정하는 쿼리를 만들었다.
+```sql
+ALTER TABLE employees ALTER INDEX ix_firstname INVISIBLE;
+
+```
+
+### 인덱스 삭제
+```sql
+ALTER TABLE ... DROP INDEX ...로 삭제할 수 있다.
+```
+PK는 클러스터링 인덱스 특성 때문에 삭제 시 임시 테이블로 레코드를 복사해서 테이블을 재구축 해야 한다.
+
+### 프로세스 조회 및 강제 종료
+```sql
+SHOW PROCESSLIST;
+
++----+-----------------+-----------+-----------+---------+------+------------------------+------------------+
+| Id | User            | Host      | db        | Command | Time | State                  | Info             |
++----+-----------------+-----------+-----------+---------+------+------------------------+------------------+
+|  5 | event_scheduler | localhost | NULL      | Daemon  | 5979 | Waiting on empty queue | NULL             |
+|  8 | root            | localhost | employees | Query   |    0 | init                   | SHOW PROCESSLIST |
++----+-----------------+-----------+-----------+---------+------+------------------------+------------------+
+2 rows in set, 1 warning (0.00 sec)
+
+    
+KILL [QUERY] 1;
+```
+
+### 활성 트랜잭션 조회
+```sql
+SELECT trx_id, 
+       (
+         SELECT CONCAT(user, '@', host)
+         FROM information_schema.PROCESSLIST
+         WHERE id = trx_mysql_thread_id
+       ) AS source_info,
+       trx_state,
+       trx_started,
+       now(),
+       (unix_timestamp(now() - unix_timestamp(trx_started))) AS lasting_sec,
+       trx_requested_lock_id,
+       trx_wait_started,
+       trx_mysql_thread_id,
+       trx_tables_in_use,
+       trx_tables_locked
+FROM information_schema.innodb_trx
+WHERE (UNIX_TIMESTAMP(now()) - unix_timestamp(trx_started)) > 5;
+```
+
+## 쿼리 성능 테스트
+### 쿼리의 성능에 영향을 미치는 요소
+1. 운영체제의 캐시
+MySQL 서버는 운영체제의 파일 시스템 관련 기능(시스템 콜)을 이용해서 데이터 파일을 읽어온다. innoDB 엔진은 파일 시스템의 캐시나 버퍼를 거치지 않는 Direct I/O를 
+사용하므로 운영체제의 캐시가 그다지 큰 영향을 끼치지 않지만 MyISAM은 그렇지 않다.
+
+2. MySQL 서버의 버퍼풀( innoDB 버퍼 풀과 MyISAM의 키 캐시)
+innoDB 버퍼 풀은 인덱스 페이지, 데이터 페이지까지 캐시하고, 쓰기 작업을 위한 버퍼링 작업까지 겸해서 처리한다. MyISAM은 인덱스에만 캐싱을 지원한다. 결국 MyISAM은 운영체제 
+캐시에 의존한다. MySQL 서버가 한 번 시작되면 innoDB 버퍼 풀, MyISAM의 키 캐시의 내용을 퍼지할 수는 없다. MySQL 서버에 포함된 키 캐시나 버퍼 푸를 초기화 하려면
+MySQL 서버를 재시작해야한다.
+특히 innoDB 버퍼 풀은 서버가 종료될 때 자동으로 덤프, 재기동하면 자동으로 적재된다. 그래서 `innodb_buffer_pool_load_at_startup`을 off로 두고 시작해야 한다.
+
+3. 네트워크적 요소
+
+4. 쿼리 테스트 횟수 : MySQL이 웜업된 상탠지 콜드 상태인지에 따라 다른 결과를 낼 것이다.
