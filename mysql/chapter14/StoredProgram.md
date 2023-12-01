@@ -227,3 +227,79 @@ SELECT ... INTO ...는 레코드 컬럼 값을 변수에 할당하는 명령으�
             END IF;
         END;;
     ```
+   2. `CASE WHEN ... THEN ... ELSE .. END CASE`
+   ```sql
+      CASE 변수
+        WHEN 비교 대상1 THEN 처리1
+        WHEN 비교 대상2 THEN 처리2
+        ELSE 처리3
+      END CASE;
+   ```
+   3. 반복 루프 : LOOP, REPEAT, WHILE이 있다. LOOP는 별도 반복 조건을 명시하지 못한다. REPEAT, WHILE은 반복 조건을 명시할 수 있다. LOOP에서 반복을 벗어나려면 LEAVE를 쓴다.
+   ```sql
+   
+   -- BEGIN
+      CREATE FUNCTION sf_factorial1 (p_max INT) 
+        RETURNS  INT
+      BEGIN 
+        DECLARE v_factorial INT DEFAULT 1;
+        factorial_loop : LOOP
+            SET v_factorial = v_factorial * p_max;
+            SET p_max = p_max - 1;
+            IF p_max <= 1 
+                THEN LEAVE factorial_loop;
+            END IF;
+        END LOOP;
+    
+        RETURN v_factorial;
+      END;;
+         
+   -- REPEAT
+   
+      CREATE FUNCTION sf_factorial2 (p_max INT)
+        RETURNS  INT
+      BEGIN 
+        DECLARE v_factorial INT DEFAULT 1;
+   
+        REPEAT
+            SET v_factorial = v_factorial * p_max;
+            SET p_max = p_max - 1;
+        UNTIL p_max < p_max - 1 END REPEAT;    
+   
+        RETURN v_factorial;
+      END;;
+   
+   -- WHILE
+   
+   CREATE FUNCTION sf_factorial2 (p_max INT)
+        RETURNS  INT
+      BEGIN 
+        DECLARE v_factorial INT DEFAULT 1;
+   
+        WHILE p_max > 1 DO
+            SET v_factorial = v_factorial * p_max;
+            SET p_max = p_max - 1;
+        END WHILE;   
+   
+        RETURN v_factorial;
+      END;;
+   ```
+   
+### 핸들러와 컨디션을 이용한 에러 핸들링
+핸들러는 예외 뿐만 아니라 거의 모든 SQL 문장의 처리 상태에 대해서 핸들러를 등록할 수 있다. 핸들러는 이미 정의한 컨디션 또는 사용자가 정의한 컨디션을 어떻게
+처리할지를 정의하는 기능이다. 
+
+핸들러를 이해하려면 MySQL SQLSTATE, ErrorNo의 의미와 관계를 알고 있어야 한다.
+에러나 경고가 발생했을 때 "ERROR ERROR-NO (SQL-STATE) : ERROR-MESSAGE" 같은 형태의 메시지를 확인할 수 있다.
+
+ - ERROR-NO
+   MySQL에서만 유효한 에러 식별 번호다.
+ - SQL-STATE
+   다섯 글자의 알파벳, 숫자로 구성되며, 에러뿐만 아니라 여러 가지 상태를 의미한다. ANSI 기반이다.
+   - "00" : 정상 처리
+   - "01" : 경고
+   - "02" : NOT FOUND( SELECT, CURSOR에서 결과 없는 경우)
+ - ERROR-MESSAGE
+   포매팅된 텍스트 문장으로, 사람이 읽을 수 있는 형태의 에러메시지다.
+
+여기서 에러 메시지는 같지만 에러 번호가 다를 수 있다. 이는 같은 원인이라도 스토리지 엔진별, SQL 문장 종류별로 다른 에러 번호를 가질 수 있기 때문이다.
