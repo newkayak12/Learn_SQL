@@ -303,3 +303,156 @@ SELECT ... INTO ...는 레코드 컬럼 값을 변수에 할당하는 명령으�
    포매팅된 텍스트 문장으로, 사람이 읽을 수 있는 형태의 에러메시지다.
 
 여기서 에러 메시지는 같지만 에러 번호가 다를 수 있다. 이는 같은 원인이라도 스토리지 엔진별, SQL 문장 종류별로 다른 에러 번호를 가질 수 있기 때문이다.
+#### 핸들러
+```sql
+DECLARE handler_type HANDLER 
+FOR condition_value [, condition_value] ... handler_statements;
+```
+
+핸들러 타입이 CONITNUE이면 hanlder_statements를 실행하고 스토어드 프로그램 마지막 실행 지점으로 돌아가서 나머지를 처리한다.
+핸들러 타입이 EXIT이면 정의된 hanlder_statements를 실행하고 BEGIN...END를 벗어난다.
+
+핸들러 정의 문장의 컨디션 값(Condition value)에는 여러 가지 형태의 값이 사용될 수 있다.
+- SQLSTATE : 스토어드 프로그램이 실행되는 도중 어떤 이벤트가 발생했을 때 해당 이벤트의 SQLSTATE 값이 일치할 때 실행되는 핸들러를 정의할 때 사용
+- SQLWARNING : 스토어드 프로그램에서 코드를 실행하던 중 경고가 발생했을 때 실행되는 핸들러를 정의할 때 사용한다. SQLWARNING은 SQLSTATE이 "01"로 시작하는 이벤트를 의미한다.
+- NOT FOUNT : SELECT 결과가 1건도 없거나 CURSOR의 레코드를 마지막까지 읽은 뒤 실행하는 핸들러를 정의할 떄 사용 SQLSTATE "02"로 시작하는 이벤트를 의미
+- SQLEXCEPTION : WARNING, NOT FOUND, "00"(정상)으로 시작하는 SQLSTATE 이외 모든 케이스를 의미하는 키워드
+
+#### 컨디션
+MySQL 핸들러는 이벤트가 발생했을 때 실행할지를 명시할 수 있는 여러 방법이 있는데 그 중 하나가 컨디션이다. 
+```sql
+DECLARE condition_name CONDITION FOR condition_value
+```
+condition_value는 아래 두 가지 방법으로 정의할 수 있다.
+- conditon_value에 MySQL 에러 번호를 사용할 때는 condition_value에 바로 MySQL 에러 번호를 입력하면 된다. CONDITION을 정의할 때는 에러 코드의 값을 여러 개 동시에 명시할 수 없다.
+- condition_value에 SQLSTATE를 명시하는 경우에는 SQLSTATE 키워드를 입력하고 그 뒤에 SQLSTATE를 입력하면 된다.
+```sql
+DELCARE dup_key CONDITION FOR 1062;
+```
+
+#### 컨디션을 사용하는 핸들러 정의
+```sql
+CREATE FUNCTION sf_testfunc() 
+        RETURNS BIGINT
+    BEGIN 
+        DECLARE dup_key CONDITION FOR 1062;
+        DECLARE EXIT HANDLER FOR dup_key
+            
+            BEGIN 
+               RETURN -1; 
+            END;
+        
+        INSERT INTO tb_test VALUES (1);
+        RETURN 1;
+    END;;
+```
+
+#### 시그널을 이용한 예외 발생
+예외나 에러에 대한 핸들링이 있다면 반대로 예외를 사용자가 직접 발생시킬 수 있는 기능이 있어야 할 것이다. 직접 예외를 발생시키려면 `SINGAL`을 사용해야 한다.
+5.5부터 지원된 기능이다.
+
+```sql
+CREATE FUNCTION sf_divide_old_style (p_dividend INT, p_divisor INT)
+     RETURNS INT
+BEGIN 
+     IF p_divisor IS NULL THEN
+        CALL __undef_procedure_divisor_is_null();
+     ELSEIF p_divisor=0 THEN
+        CALL __undef_procedure_divisor_is_0();
+     ELSEIF p_dividend IS NULL THEN
+         RETURN 0;
+     END IF;
+    
+     RETURN FLOOR(p_dividend / p_divisor);
+END;;
+```
+
+#### 스토어드 프로그램의 BEGIN...END 블록에서 SIGNAL 사용
+
+```sql
+CREATE FUNCTION sf_divide (p_dividend INT, p_divisor INT)
+     RETURNS INT
+BEGIN 
+     IF p_divisor IS NULL THEN
+        SIGNAL null_divisor
+        SET MESSAGE_TEXT = 'Divisor can not be null', MYSQL_ERRNO = 9999;
+     ELSEIF p_divisor=0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Divisor can not be 0', MYSQL_ERRNO = 9998;
+     ELSEIF p_dividend IS NULL THEN
+        SIGNAL SQLSTATE '01000'
+        SET MESSAGE_TEXT = 'Dividend is null, so regarding dividend as 0', MYSQL_ERRNO = 9997;
+        
+        RETURN 0;
+     END IF;
+    
+     RETURN FLOOR(p_dividend / p_divisor);
+END;;
+```
+
+#### 핸들러 코드에서 SIGNAL 사용
+핸들러는 스토어드 프로그램에서 에러나 예외에 대한 처리를 담당한다. 하지만 핸들러 코드에서 SIGNAL 명령을 사용해 발생된 에러나 예외를 다른 사용자 정의 예외로 변환해서 다시 던지는 것도 가능하다.
+```sql
+CREATE PROCEDURE sp_remove_user (IN p_userid INT) 
+BEGIN 
+   DECLARE v_affectedrowcount INT DEFAULT 0;
+   DECLARE EXIT HANDLER FOR SQLEXCEPTION 
+       BEGIN 
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Can not remove user information', MYSQL_ERRNO = 9999;
+       END;
+   
+   DELETE FROM tbl_user WHERE user_id = p_userid;
+   SELECT ROW_COUNT() INTO v_affectedrowcount;
+   
+   IF v_affectedrowcount <> 1 THEN
+      SIGNAL SQLSTATE '45000';
+   END IF;
+END;;
+```
+
+#### 커서
+스토어드 프로그램의 커서는 JDBC에서 자주 사용하는 ResultSet이다. 하지만 스토어드 프로그램에서 사용하는 커서는 JDBC ResultSet에 비해는 
+기능이 상당히 제약적이다.
+
+- 스토어드 프로그램의 커서는 전 방향(전진) 읽기만 가능하다.
+- 스토어드 프로그램에서는 커서의 컬럼을 바로 업데이트 하는 것이 불가능하다.
+
+DBMS 커서는 센서티브 커서, 인센서티브 커서로 구분할 수 있다.
+
+- 센서티브 커서는 일치하는 레코드에 대한 정보를 실제 레코드 포인터만으로 유지하는 형태다. 센서티브 커서는 커서를 이용해서 컬럼 데이터를 변경하거나 삭제하는 것이 가능하다.
+또한 컬럼 의 값이 변경돼서 커서를 생성한 SELECT 쿼리의 조건에 더는 일치하지 않거나 레코드가 삭제되면 커서도 즉시 반영된다. 센서티브 커서는 별도로 임시테이블로 레코드를 복사하지 않기에
+커서 오픈이 빠르다.
+
+- 인센서티브는 일치하는 레코드를 별도의 임시 테이블로 복사해서 가지고 있는 형태다. 인센서티브 커서는 SELECT 쿼리에 부합되는 결과를 우선적으로 임시 테이블로 복사하기
+떄문에 느리다. 그리고 이미 임시테이블로 복사된 데이터를 조회하는 것이라 커서를 통해 컬럼 값을 변경하거나 레코드 삭제 작업이 불가하다. 하지만 다른 트랜잭션과 충돌은 발생하지 않는다.
+
+센서티브, 인센서티브를 혼용하는 방식은 어센서티브(Asensitive)라고 한다. MySQL 스토어드 프로그램에서 정의되는 커서는 어센서티브에 속한다. 그래서 MySQL 커서는
+데이터가 임시 테이블로 복사될 수도, 아닐 수도 있다. 이는 알 수 없다. 결론적으로 커서를 통해서 컬럼 삭제, 변경이 불가하다.
+
+SELECT로 커서를 정의하고 OPEN 하면 결과를 가져온다. 이렇게 오픈된 커서는 FETCH로 레코드 단위로 읽을 수도 있다.
+
+```sql
+CREATE FUNCTION sf_emp_count(p_dept_no VARCHAR(10))
+        RETURNS BIGINT
+   BEGIN 
+      DECLARE v_total_count INT DEFAULT 0;
+      DECLARE v_no_more_data TINYINT DEFAULT 0;
+      DECLARE v_emp_no INTEGER;
+      DECLARE v_from_date DATE;
+      DECLARE v_emp_list CURSOR FOR 
+       SELECT emp_no, from_date FROM dept_emp WHERE dept_no=p_dept_no;
+      DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_from_date = 1;
+      
+      OPEN v_emp_list;
+      REPEAT 
+         FETCH v_emp_list INTO v_emp_no, v_from_date;
+         
+         IF v_emp_no > 20000 THEN
+            SET v_total_count = v_total_count + 1;
+         END IF;
+      UNTIL v_no_more_data END REPEAT;
+      CLOSE v_emp_list;
+      RETURN v_total_count;
+   END;;
+```
