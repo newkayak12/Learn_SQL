@@ -456,3 +456,111 @@ CREATE FUNCTION sf_emp_count(p_dept_no VARCHAR(10))
       RETURN v_total_count;
    END;;
 ```
+
+#### DETERMINISTIC, NOT DETERMINISTIC
+- DETERMINISTIC: 스토어드 프로그램 입력이 같으면 시점, 상황에 관계없이 항상 같다.
+- NOT DETERMINISTIC: 시점에 따라 달라진다.(기본값)
+
+```sql
+CREATE FUNCTION sf_getDate1()
+   RETURNS DATETIME
+   NOT DETERMINISTIC
+BEGIN
+   RETURN NOW();
+END;
+-- 변하지 않을 것을 의미하며 레인지스캔
+
+CREATE FUNCTION sf_getDate1()
+   RETURNS DATETIME
+   DETERMINISTIC
+BEGIN
+   RETURN NOW();
+END;
+-- 변할 수 있음을 의미하며 풀스캔
+```
+
+#### 스토어드 프로그램과 세션 변수
+스토어드 프로그램에서는 DECLARE로 로컬 변수를 선언할 수 있다. 또한 스토어드 프로그램 내에서는 "@"로 시작하는 사용자 변수를 사용할 수도 있다. DECLARE는 정확한 타입, 길이를 명시해야 하지만
+`@`는 이런 제약이 없다. 
+
+
+```sql
+CREATE FUNCTION sf_getSum(p_arg1 INT, p_arg2 INT) 
+        RETURNS INT
+   BEGIN
+       DECLARE v_sum INT DEFAULT 0;
+       SET @v_sum=p_arg1 + p_arg2;
+       
+       RETURN  v_sum;
+   END;;
+
+SELECT sf_getSum(1,2);;
+SELECT @v_sum;;
+```
+
+사용자 변수는 타입 세이프하지 않으면, 로컬 변수보다 스코프가 넓어 문제가 생길 수 있다. 또한 커넥션 내에는 값을 유지하기 때문에 사용하기 전 초기화하는 것이 좋다.
+그래도 로컬 변수를 사용하는 것이 좋다. 
+
+
+#### 재귀 호출
+스토어드 프로시저는 재귀호출이 가능하며, 함수, 트리거, 이벤트는 불가하다. 재귀가 무제한 적으로 일어날 수는 없다. 메모리 문제 때문이다. 그래서 최대 몇 번까지
+재귀 가능할지를 정할 수 있다. `max_sp_recursion_depth`
+
+
+```sql
+CREATE PROCEDURE sp_decreaseMultiply( IN p_current INT, INOUT p_sum INT) 
+    BEGIN 
+       SET p_sum = p_sum * p_current;
+       IF p_current > 1 THEN
+          CALL sp_decreaseMultiply(p_current - 1, p_sum)
+       END IF;
+    END;;
+
+
+CREATE PROCEDURE sp_getFactorial(IN p_max INT, OUT p_sum INT)
+    BEGIN 
+       SET max_sp_recursion_depth = 50;
+       set p_sum = 1;
+       
+       IF p_max > 1 THEN
+          CALL sp_decreaseMultiply(p_max, p_sum);
+       END IF;
+    END;;
+
+CALL sp_getFactorial(10, @factorial);
+SELECT @factorial;
+```
+
+#### 중첩된 커서 사용
+일반적으로 하나 커서 열고 닫고, 새롭게 열고 닫고 하는 형태로 보통 사용하지만 동시에 두 개를 열어야 할 수도 있다.
+```sql
+CREATE PROCEDURE sp_updateEmployeeHireDate() 
+BEGIN 
+   DECLARE v_dept_no CHAR(4);
+   DECLARE v_emp_no INT;
+   DECLARE v_no_more_rows BOOLEAN DEFAULT FALSE;
+   DECLARE v_dept_list CURSOR FOR SELECT dept_no FROM departments;
+   DECLARE v_emp_list CURSOR FOR SELECT emp_no FROM dept_emp WHERE dept_no=v_dept_no LIMIT 1;
+   
+   DECLARE CONTINUE HANDLER FOR NOT FOUND SELECT v_no_more_rows := TRUE;
+   
+   OPEN v_dept_list;
+   LOOP_OUTER: LOOP
+      FETCH v_dept_list INTO v_dept_no;
+      IF v_no_more_rows THEN
+         CLOSE v_dept_list;
+         LEAVE LOOP_OUTER;
+      END IF;
+   END LOOP;
+   
+   OPEN v_emp_list;
+   LOOP_INNER: LOOP 
+      FETCH v_emp_list INTO v_emp_no;
+      IF v_no_more_rows THEN
+         SET v_no_more_rows := FALSE;
+         CLOSE v_emp_list;
+         LEAVE LOOP_INNER;
+      END IF;
+   END LOOP;
+END;
+```
