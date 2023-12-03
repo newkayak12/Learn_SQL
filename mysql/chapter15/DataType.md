@@ -90,4 +90,93 @@ CREATE TABLE tb_member (
 ```
 
 
-#### utf8mb4 문자 집합의 콜레이션
+#### 이스케이프
+| 이스케이프 | 의미              | 
+|:------|:----------------|
+| \0    | 아스키  NULL       |
+| \'    | '               |
+| \"    | "               |
+| \b    | 백스페이스           |
+| \n    | 개행              |
+| \r    | carriage return |
+| \t    | tab             |
+| \\    | \               |
+| \%    | %(LIKE에서 사용)    |
+| \_    | _(LIKE에서 사용)    |
+
+
+#### 숫자
+숫자는 정확도에 따라 Exac랑 근삿값으로 나뉜다.
+- Exact는 소수점 이하 값의 유무와 관계없이 정확히 그 값을 그대로 유지하는 것을 의미한다. INTEGER, INT, DECIMAL이 있다.
+- 근삿값은 부동 소수점이라고 불리는 것이다. FLOAT, DOUBLE이 있다.
+
+#### AUTO_INCREMENT 옵션 사용
+`auto_increment` 와 `auto_increment_offset` 설정 값으로 자동 증가 값이 얼마가 도리지 변경할 수 있다.
+
+- MyISAM은 자동 증가 옵션이 사용된 컬럼이 PK, UNIQUE 아무데나 사용할 수 있다.
+- innoDB 스토리지에는 AUTO_INCREMENT로 PK를 생성해야 한다. PK 뒤에 AUTO_INCREMENT를 배치하면 오류가 발생한다. 
+
+#### 날짜와 시간
+| 데이터 타입    | MySQL 5.6.4 이전 | MySQL 5.6.4 이후       |
+|:----------|:---------------|:---------------------|
+| YEAR      | 1byte          | 1byte                |
+| DATE      | 3byte          | 3byte                |
+| TIME      | 3byte          | 3byte + 밀리초 단위 저장 공간 |
+| DATETIME  | 8byte          | 5byte + 밀리초 단위 저장 공간 |
+| TIMESTAMP | 4byte          | 4byte + 밀리초 단위 저장 공간 |
+
+밀리초 단위 자릿수가 1 ~ 2면 1바이트, 3 ~ 4는 2바이트, 5 ~ 6 3바이트
+
+#### 타임존
+```sql
+SET time_zone='America/Los_Angeles';
+SHOW VARIABLES LIKE '%time_zone%';
+```
+
+#### 자동 업데이트 
+MySQL 5.6이전 까지는 TIMESTAMP는 레코드의 다른 컬럼 데이터가 변겨될 때마다 시간이 자동 없이트 되고, DATETIME은 그렇지 않았다. 5.6부터는 고정이고, 업데이트 떄마다
+자동 업데이트 되게 하려면 옵션을 정의해야 한다.
+
+```sql
+CREATE TABLE tb_autoupdate (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    title VARCHAR(20),
+    created_at_ts TIMESTAMP DEFAULT  CURRENT_TIMESTAMP,
+    updated_at_ts TIMESTAMP DEFAULT  CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at_dt TIMESTAMP DEFAULT  CURRENT_TIMESTAMP,
+    update_at_dt TIMESTAMP DEFAULT  CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+        
+);
+```
+
+#### ENUM 
+ENUM은 테이블 구조에 나열된 목록 중 하나의 값을 가질 수 있다.
+```sql
+CRATE TABLE tb_enum (fd_enum ENUM("PROCESSING", "FAILURE", "SUCCESS"));
+INSERT INTO tb_enum VALUES ("PROCESSING"), ("FAILRUE");
+
+-- 실제로는 문자열이 아닌 매핑된 정수 값을 사용한다. ENUM 최대는 65,535개이고 255 미만이면 1바이트를 사용하고 그 이상이면 2바이트를 사용한다. 
+
+
+mysql> ALTER TABLE tb_enum MODIFY fd_enum ENUM('PROCESSING','FAILURE','SUCCESS','REFUND'), ALGORITHM=INSTANT;
+mysql> ALTER TABLE tb_enum MODIFY fd_enum ENUM('PROCESSING','FAILURE','REFUND','SUCCESS'), ALGORITHM=COPY, LOCK=SHARED;
+```
+
+#### SET
+테이블 구조에 정의된 아이템을 정수 값으로 매핑해서 쓰는 것은 똑같다. 큰 차이는 하나의 컬럼에 1 이상의 값을 저장할 수 있다는 것이다. MySQL은 내부적으로 BIT-OR 연산으로 1개 이상의 선택된 값을 저장한다.
+
+```sql
+CREATE TABLE tb_set ( fd_set SET('TENNIS','SOCCER','GOLF','TABLE-TENNIS','BASKETBALL','BILLIARD') );
+INSERT INTO tb_set (fd_set) VALUES ('SOCCER'), ('GOLF,TENNIS');
+SELECT * FROM tb_set;
++-------------+
+|    fd_set   |
++-------------+ 
+|    SOCCER   |
+| TENNIS,GOLF | 
++-------------+
+
+```
+
+#### TEXT, BLOB
