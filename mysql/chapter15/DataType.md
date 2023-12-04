@@ -180,3 +180,114 @@ SELECT * FROM tb_set;
 ```
 
 #### TEXT, BLOB
+TEXT, BLOB은 거의 똑같은 설정이나 방식을포 작동한다. 유일한 차이점은 TEXT는 문자열을 저장하는ㄷ 대용량 컬럼이라 문자 집합이나 콜레이션을 가진다는 것이고,
+BLOB은 이진 데이터 타입이라 별도의 문자 집합이나 콜레이션을 갖지 않는다는 것이다. 추가로 TEXT나 BLOB은 아래와 같은 상황에서 사용한다.
+
+- 컬럼 하나에 저장되는 문자열이나 이진 값의 길이가 예측할 수 없이 클 때 TEXT 또는 BLOB을 사용한다. 4000바이트를 넘는다고 무조건 사용해야하는 것은 아니다. 레코드 전체 크기가 64KB를 넘지 않는다면 VARCHAR, VARBINARY의 길이 제한이 없다. 
+- MySQL 버전에 따라 차이는 있을 수 있지만 보통 레코드 최대 크기가 64KB다. 이 용량을 다썻다면 일부 컬럼을 TEXT, BLOB으로 변경하는 것을 고려해야한다.
+
+추가로 BLOB, TEXT 크기가 크면 `max_allowed_packet` 변수 값보다 큰 문장은 서버로 전송되지 못할 수도 있다. 따라서 이런 경우 이 시스템 변수를 조정해야 한다. 
+
+------
+
+##공간 데이터 
+### 공간 데이터 타입
+MySQL에서 제공하는 공간 정보 저장용 데이터 타입은 POINT, LINESTRING, POLYGON, GEOMETRY, MULTIPOINT, MULTILINESTRING, MULTIPOLYGON, GEOMETRYCOLLECTION이다.
+- POINT : 하나의 점 정보
+- LINESTRING : 하나의 라인
+- POLYGON : 하나의 다각형
+- GEOMETRY : 위 타입들의 SUPER TYPE 그러나 하나의 객체만 저장할 수 있다. 
+- MULTIPOINT : 내용은 같으나 여러 개를 저장할 수 있다.
+- MULTILINESTRING : 내용은 같으나 여러 개를 저장할 수 있다.
+- MULTIPOLYGON : 내용은 같으나 여러 개를 저장할 수 있다.
+- GEOMETRYCOLLECTION : 내용은 같으나 여러 개를 저장할 수 있다.
+
+GEOMETRY의 모든 자식은 서버의 메모리에는 BLOB 객체로 관리된다. 클라이언트 전송도 BLOB으로 된다. 결과적으로 GEOMETRY가 BLOB을 감싼다고 보면 된다.
+
+
+## JSON 타입
+5.7부터 JSON타입이 지원됐다. 이렇게 저장하면 MongoDB같이 바이너리 포맷(BSON)으로 변환해서 저장한다.
+### 저장 방식
+BSON으로 저장하기 때문에 BLOB, TEXT보다 공간 효율이 높은 편이다. MySQL에서는 큰 용량의 JSON이 저장되면 16KB로 쪼개서 저장한다.
+
+### 부분 업데이트
+8.0부터 JSON의 PartialUpdate가 지원된다. `JSON_SET()`, `JSON_REPLACE()`, `JSON_REMOVE()`로 이행할 수 있다.
+
+```sql
+UPDATE  tb_json
+SET fd=JSON_SET(fd, '$.user_id', "1234")
+WHERE id = 2;
+```
+
+여기서 정확히 부분 업데이트를 했는지는 알 수 없다. 하지만 `JSON_STORAGE_SIZE()`, `JSON_STORAGE_FREE()`로 대략 예측은 가능하다.
+
+
+### JSON 타입 콜레이션과 비교
+JSON 컬럼으로 저장되는 데이터는 모두 utf8mb4 charset, utf8mb4_bin collation 을 가진다.
+
+### JSON 컬럼 선택
+BLOB, TEXT에 JSON을 저장하면 변환 없이 그대로 저장한다. 그러나 JSON 타입은 JSON을 BSON으로 컴팩션해서 저장할 뿐만 아니라 필요한 경우 부분 업데이트도 지원한다.
+그렇다면 일반적으로 정규화한 컬럼, JSON 컬럼 중에는 어떤 것을 사용해야 하는가? JSON으로만 구성된 테이블과 정규화된 컬럼으로 사용하는 테이블 예시를 보자
+
+```sql
+CREATE TABLE tb_json (
+    doc JSON NOT NULL,
+    id BIGINT AS (doc ->> `$.id`) STORED NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE tb_column (
+    id BIGINT NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    PRIMARY KEY (id)
+);
+```
+
+성능적인 부분에서 정규화된 컬럼이 낫다. 정규화된 컬럼을 컬럼 이름을 메타 정보로만 저장하기 떄문에 컬럼 이름이 별도 데이터 파일의 공간을 차지하지 않는다.
+그러나 JSON은 매번 저장돼야 한다. 물론 압축을 사용해서 디스크 공간을 줄일 수는 있지만 메모리 사용 효율을 높이는 것은 아니다.
+
+또한 MySQL에서 정규화된 컬럼 사용의 경우 BLOB, TEXT는 외부 페이지로 관리된다. 이러한 장점을 잘 활용하면 메모리 효율, 쿼리 성능을 올릴 수 있다. 
+그러나  모든 데이터를 JSON 타입 컬럼에 저장하면 쿼리가 필요한 데이터를 선별적으로 접근할 수 있는 이점을 잃게 된다.
+
+물론 장점도 있다. 레코드가 가지는 속성이 너무 상이하고 레코드별로 선택적 값을 가지는 경우라면 JSON 컬럼을 고려할 만하다. 또한 너무 정규화된 테이블 구조를 유지하면
+테이블 개수가 늘고 그에 따라 응용 프로그램 코드도 비대해진다. 
+
+
+## 가상 컬럼(파생 컬럼)
+다른 DBMS는 `VirtualColumn`으로 부르고 MySQL은 `GeneratedColumn`이라고 명명했다. MySQL의 가상 컬럼은 크게 VirtualColumn, StoredColumn으로 나뉜다.
+```sql
+-- virtual
+CREATE TABLE tb_virtual_column (
+    id INT NOT NULL AUTO_INCREMENT,
+    price DECIMAL(10,2) NOT NULL DEFUALT '0.00',
+    quantity INT NOT NULL DEFAULT 1, 
+    total_price DECIMAL(10,2) AS (quantity * price) VIRTUAL,
+    PRIMARY KEY (id)
+);
+
+-- stored
+CREATE TABLE tb_virtual_column (
+   id INT NOT NULL AUTO_INCREMENT,
+   price DECIMAL(10,2) NOT NULL DEFUALT '0.00',
+   quantity INT NOT NULL DEFAULT 1,
+   total_price DECIMAL(10,2) AS (quantity * price) STORED,
+   PRIMARY KEY (id)
+);
+```
+
+둘 다 `AS` 뒤 계산 식을 정의한다. 가상 컬럼의 기본 값은 VIRTUAL이다. 가상 컬럼의 표현식은 입력이 동일하면 시점과 관계없이 결과가 동일한(DETERMINISTIC) 표현식만 사용할 수 있다. 
+
+1. 가상 컬럼
+- 컬럼 값이 디스크에 저장되지 않는다.
+- 컬럼 구조 변경은 테이블 리빌드를 필요로 하지 않는다.
+- 컬럼은 레코드가 읽히기 전 또는 BEFORE 트리거 실행 직후 계산된다.
+
+2. 스토어드 컬럼
+- 물리적으로 저장된다.
+- 컬럼 구조 변경은 테이블 리빌드를 수반한다.
+- INSERT, UPDATE 시에 계산된다.
+
+둘의 차이는 실제 저장 여부다. 가상 컬럼은 디스크에 저장되지는 않지만 항상은 아니다. 가상 컬럼에 인덱스를 생성하면 테이블 레코드는 가상 컬럼을 포함하지는 않지만
+해당 인덱스는 계산된 값을 저장한다.그래스 인덱스가 생성된 가상 컬럼의 경우 필요하다면 인덱스 리빌드가 필요하다. 
+
+두 가지 중 하나를 선택하는 경우는 계산 복잡도가 크면 STORED, 아니라면 VIRTUAL이 낫다 정도다. CPU 부하를 줘서 디스크 부하를 낮출 것이냐, 디스크 부하를 줘서 CPU 부하를 낮출 것이냐의 선택지다 
