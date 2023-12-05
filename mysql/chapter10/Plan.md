@@ -134,5 +134,17 @@ MySQL이 각 테이블 레코드를 어떤 방식으로 읽었는지를 나타�
 - Using index for group-by: grouping 기준 컬럼을 이용해서 정렬 작업을 수행하고 다시 정렬된 결과를 grouping한다. Group by가 인덱스를 탄다면 정렬된 인덱스를 읽으면서 순서대로 Grouping한다. 이때 표시된다.
 - tide index scan을 통한 group by : avg, sum, count처럼 다 조회해야 한다면
 - loose index scan을 통한 group by : max, min같이 첫 번쨰 또는 마지막 레코드만 읽어도 되는 경우 
-- Using index for skip scan : 
-
+- Using index for skip scan : 인덱스 스캡 스캔 최적화를 사용하면 표시한다.
+- Using join buffer(Block Nested Loop || Batched Key Access || hash join) : 조인은 인덱스가 없는 테이블을 읽고 있는 테이블(FK)를 읽어서 진행한다. 적절한 인덱스가 없으면 서버는 블록 네스티드 루프 조인이나 해시 조인을 쓴다.
+이 때 조인 버퍼를 사용하는데, 실행 계획에서 조인 버퍼가 사용되는 실행 계획은 Extra 컬럼에는 Using join buffer라는 메시지가 나온다.
+- Using MRR : innoDB를 포함한 스토리진 엔진 레벨에서는 쿼리 실행의 전체적인 부분을 알지 못한다. 그래서 최적화에 한계가 있다. 이러한 이유로 아무리 많은 레코드를 읽어야 해도 스토리지 엔진은 MySQL 엔진이 넘겨주는
+값을 기준으로 레코드를 한 건 한 건 읽어서 반환해야만 한다. 이러한 문제를 해결하기위해서 MRR(Multi Range Read)를 도입했다. MySQL 엔진은 여러 개의 키를 한 번에 스토리지 엔진으로 전달하고, 스토리지 엔진은 넘겨받은
+키 값들을 정렬해서 최소한 페이지 접근만으로 레코드를 읽을 수 있도록 최적화한다.
+- Using sort_union(...), Using union(...), Using intersect(...) : 쿼리 index_merge 접근 방법으로 실행되는 경우에는 2개 이상의 인덱스가 동시에 사용될 수 있다. 실행계획의 Extra에는
+두 인덱스로부터 읽은 결과를 어떻게 병합했는지 나타낸다.
+  - Using sort_union(...) : Using union과 같은 작업을 수행하지만 Using union으로 처리할 수 없으면 (OR 연결된 상대적으로 대량의 range 조건) 이 방식으로 처리한다. Using sort_union은 PK만 먼저 읽어서 정렬하고 병합한 이후 비로소 레코드를 읽어서 반환할 수 있다는 것
+  - Using union(...) : 각 인덱스를 사용할 수 있는 조건이 OR로 연결된 경우 각 처리 결과에서 합집합을 추출하는 작업을 수행했다는 의미다.
+  - Using intersect(...) : 각각의 인덱스를 사용할 수 있는 조건이 AND로 연결돈 경우 각 처리 결과에서 교집합을 추출하는 작업을 했단 의미다.
+- Using temporary : 쿼리 처리 중 임시 테이블을 생성하면 출력된다. 메모리 상에 생성될 수도, 디스크 상에 생성될 수도 있다. 
+- Using where : MySQL은 내부적으로 MySQL엔진과 스토리지 엔진 두 개의 레이어로 나눠있다. MySQL엔진은 스토리지 엔진으로부터 받은 레코드를 가공, 연산하는 작업을 수행하는데, MySQL 엔진 레이어에서 별도 가공을 하면 출력된다. 
+- Zero limit : 때로는 데이터가 아닌 쿼리 결과의 메타데이터만 필요한 경우도 있다. 즉 쿼리가 몇 개의 컬럼을 가지고 컬럼 타입은 무엇인지 등의 정보 말이다. 이런 경우 `LIMIT 0`을 사용하면 되는데 이때는 옵티마이저 사용자의 의도를 파악하고 레코드는 읽지 않고 결과 값의 메타 정보만 반환한다. 
