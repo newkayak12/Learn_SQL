@@ -96,3 +96,30 @@ MySQL를 종료시킨다.
 gtid_mode=ON 
 enfoce_gtid_consistency=ON
 ```
+- 고유한 server_id 사용 : 그룹 복제에 참여하는 서버들은 모두 각기 다른 고유한 server_id를 가져야 한다.
+- 복제 메타데이터 저장소 설정 : 그룹 복제에서 복제 관련 메타 데이터는 데이터 일관성으 루이해서 파일이 아닌 테이블에 저장돼야 한다. 따라서 MySQL 서버에서 master_info_repository 및 relay_log_info_repository 시스템 변수의 값이 TABLE로 설정돼 있어야 한다.
+- 트랜잭션 WriteSet 설정 : 트랜잭션에서 변경한 데이터에 대한 정보, 즉 트랜잭션의 WriteSet이 수집될 수 있도록 `transaction_write_set_extraction`이 `XXHASH64`로 설정돼야 한다. 트랜잭션의 WriteSet은 그룹 복제에서 트랜잭션 간 충돌을 탐지하는 트랜잭션 인증 단계에서 사용한다.
+- 테이블 스페이스 암호화 : `default_table_encryption` 시스템 변수는 모든 그룹 멤버에서 동일한 값으로 설정돼야 한다.
+- lower_case_table_names : `lower_case_table_names `이 변수롤 모든 그룹 멤버에서 맞춰야 한다.
+- 멀티 쓰레드 복제 설정 : 그룹 복제에서도 멀티 쓰레드 복제 기능을 사용해서 트랜잭션을 병렬로 적용할 수 있다. 이 때 복제 트랜잭션이 멀티 쓰레도로 작동될 때 원본 서버에서 커밋된 순서와 동일한 순서로 커밋되도록 `slave_preserve_commit_order`를 ON으로 해야한다. 
+```sql
+[mysqld]
+slave_parallel_workers=N
+slave_parallel_type=LOGICAL_CLOCK
+slave_preserve_commit_order=1
+```
+
+## MySQL 라우터
+innoDB에서 애플리케이션 서버로부터 유입된 쿼리 요청을 클러스터 내 적절한 MySQL 서버로 전달하고 반환된 쿼리 결과를 다시 애플리케이션 서버로 전달하는 proxy 역할을 한다.
+주요 기능은
+1. innoDB 클러스터의 MySQL 구성 변경 자동 감지
+2. 쿼리 부하 분산
+3. 자동 failover
+
+## InnoDB 클러스터 구축
+### 요구 사항
+1. MySQL 5.7.17 이상
+2. MySQL 셸 1.0.8 이상
+3. 라우터 2.1.2 이상
+4. innoDB 클러스터 MySQL 서버들은 모두 Performance 스키마가 활성화돼 있어야 한다. 
+5. MySQL 셸을 사용해서 innoDB 클러스터를 구성하기 위해서 설치될 서버에 python 2.7이상이 설치돼 있어야 한다.
