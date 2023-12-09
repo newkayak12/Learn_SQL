@@ -47,4 +47,45 @@ MySQL에서는 이런 이유로 상세한 정보를 수집하서 한 곳에 모�
 - variables_info : 전체 시스템 변수에 대해 설정 가능한 값 범위 및 가장 최근에 변수의 값을 변경한 계정 정보 등이 저장돼 있다.
 - user_variables_by_thread : 연결돼 있는 세션에서 생성한 사용자 변수들에 대한 정보
 - global_status : 전역 상태 변수들에 대한 정보
+- session_status : 현재 세션에 대한 세션 범위의 상태 변수드르이 정보가 저장돼 있다.
+- status_by_thread : 서버에 연결돼 있는 전체 세션들에 대한 세션 범위의 상태 변수들의 정보가 저장돼있으며, 세션벼롤 구분될 수 있는 상태 변수만 저장된다. 
+
+### 5. Event 테이블
+
+  Event는 Wait, Stage, Statment, Transaction으로 구분돼 있다. 
+
+> Transaction Events
+> > Statement Events
+> > > Stage Events
+> > > > Wait Events (io, lock, sync ...)
+
+ 또한 각 이벤트는 세 가지 유형의 테이블을 가지는데 테이블 명 후미에 해당 테이블에 속해있는 유형의 이름이 표시된다. 
+
+- current : 쓰레드 별로 가장 최신의 이벤트 1 건만 저장되며, 쓰레드가 종료되면 해당 쓰레드의 이벤트 데이터는 바로 삭제된다.
+- history : 쓰레드 별로 가장 최신의 이벤트가 저장된 최대 개수만큼 저장된다. 쓰레드가 종료되면 해당 쓰레드의 이벤트 데이터는 바로 삭제되며, 쓰레드가 계속 사용 중이면서 쓰레드별 최대 저장 개수를 넘은 경우 이전 이벤트를 삭제하고 최근 이벤트를 새로 저장함으로써 최대 개수를 유지한다.
+- history_log : 전체 쓰레드에 대한 최근 이벤트들을 모두 저장하며, 지정한 전체 최대 개수만큼 데이터가 저장된다. 쓰레드가 종료되는 것과 관계없이 지정된 최대 개수만큼 이벤트 데이터를 가지고 있으며, 저장된 이벤트 데이터가 전체 최대 저장 개수를 넘어가면 이전 이벤트들을 삭제하고 최근 이벤트를 새로 저장함으로써 최대 개수를 유지한다.
+
+#### Wait Event
+각 쓰레드에서 대기하고 있는 이벤트들에 대한 정보를 확인할 수 있다. 일반적으로 잠금 경합 또는 I/O 작업 등으로 인해 쓰레드가 대기한다.
+- events_waits_current
+- events_waits_history
+- events_waits_history_long
+
+#### Stage Event 테이블
+각 쓰레드에서 실행한 쿼리들의 처리 단계에 대한 정보를 확인할 수 있다. 이를 통해 실행된 쿼리가 구문 분석, 테이블 열기, 정렬 등과 같은 쿼리 단계 중 현재 어느 단계를 수행하고 있는지와 처리 단계별 소요 시간 등을 알 수 있다.
+- events_stages_current
+- events_stages_history
+- events_stages_history_long
+
+#### Statement Event 테이블
+각 쓰레드에서 실행한 쿼리들에 대한 정보를 확인할 수 있다. 실행된 쿼리와 쿼리에서 반환된 레코드의 수, 인덱스 사용 유무 및 처리된 방식 등의 다양한 정보를 함계 확인할 수 있다.
+- events_statements_current
+- events_statements_history
+- events_statements_history_long
+
+#### Transaction Event 테이블
+각 쓰레드에서 실행한 트랜잭션에 대한 정보를 확인할 수 있다. 트랜잭션별로 트랜잭션 종류와 현재 상태, 격리 수준등을 알 수 있다.
+- events_transactions_current
+- events_transactions_history
+- events_transactions_history_long
  
