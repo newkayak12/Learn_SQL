@@ -88,4 +88,90 @@ MySQL에서는 이런 이유로 상세한 정보를 수집하서 한 곳에 모�
 - events_transactions_current
 - events_transactions_history
 - events_transactions_history_long
- 
+
+### Summary 테이블
+Summary 테이블들은 Performance 스키마가 수집한 이벸트들을 특정 기준별로 집계한 후 요약한 정보를 제공한다. 
+- events_waits_summary_by_account_by_event_name : DB 게정별, 이벤트 클래스별로 분류해서 집계한 Wait 이벤트 통계 정보를 보여준다.
+- events_waits_summary_by_host_by_event_name : 호스트별, 이벤트 클래스별로 분류해서 집계한 Wait 이벤트 통계 정보를 보여준다.
+
+.....
+
+- status_by_account : DB 계정별 상태 변수 값을 보여준다.
+- status_by_host : 호스트별 상태 변수값을 보여준다. 
+- status_by_user : DB 계정명별 상태 변수 값을 보여준다. 
+
+### Lock 테이블
+
+Lock 테이블들에서는 MySQL에서 발생한 잠금과 관련된 정보를 제공한다.
+
+- data_locks : 현재 잠금이 점유됐거나 잠금이 요청된 상태에 있는 데이터 관련 락( 레코드 락, 갭 락)에 대한 정보를 보여준다.
+- data_lock_waits : 이미 점유된 데이터 락과 이로 인한 잠근 요청이 차단된 데이터 락 간의 관계 정보를 보여준다. 
+- metadata_locks : 현재 잠금이 점유된 메타데이터 락들에 대한 정보를 보여준다.
+- table_handles : 현재 잠금이 점유된 테이블 락들에 대한 정보를 보여준다. 
+
+### Replication 테이블
+
+Replication 테이블들에서는 "SHOW [REPLICA | SLAVE] STATUS" 명령문에서 제공하는 것보다 더 상세한 복제 관련 정보를 제공한다. 
+
+- replication_connection_configuration : 소스 서버로 복제 연결 정보가 저장돼 있다.
+- replication_connection_status : 소스 서버에 대한 복제 연결의 현재 상태 정보를 보여준다.
+
+...
+
+- replication_group_member_stats : 각 그룹 복제 멤버의 트랜잭션 처리 통계 정보 등을 보여준다. 
+- binary_log_transaction_compression_stats : 바이너리 로그 릴레이 로그에 저장되는 트랜잭션의 압축에 대한 통계 정보를 보여준다. 이 테이블은 MySQL 서버에서 
+바이너리 로그가 활성화돼 있고, `binlog_transaction_compression` 시스템 변수가 ON이면 데이터가 저장된다. 
+
+### Clone 테이블
+
+Clone 테이블들은 Clone 플러그인을 통해 수행되는 복제 작업에 대한 정보를 제공한다. Clone 테이블들은 서버에서 Clone 플러그인이 설치될 때 자동으로 생성되고, 플러그링니 삭제될 떄 함께 제거된다.
+
+- clone_status : 현재 또는 마지막으로 실행된 클론 작업에 대한 상태 정보를 보여준다.
+- clone_progress : 현재 또는 마지막으로 실행된 클론 작업에 대한 진행 정보를 보여준다.
+
+### 기타 테이블
+
+기타 테이블은 앞서 분류된 범주들에 속하지 않는 나머지 테이블들을 의미하며, 다음의 테이블들이 이에 해당된다.
+
+- error_log : MySQL 에러 로그 파일의 내용이 저장돼 있다.
+- host_cache : 호스트 캐시 정보가 저장돼 있다.
+- keyring_keys : Keyring 플러그인에서 사용되는 키에 대한 정보가 저장돼 있다. 
+- log_status : 서버 로그 파일들의 포지션 정보가 저장돼 있으며, 온라인 백업 시 활용될 수 있다. 
+- performance_timers : Performance 스키마에서 사용 가능한 이벤트 타이머들과 그 특성에 대한 정보가 저장돼 있다.
+- processlist : 서버에 연결된 세션 목록과 각 세션의 현재 상태, 세션에서 실행 중인 쿼리 정보가 저장돼 있다. processlist 테이블에서 보여지는 데이터는 `SHOW PROCESSLIST`를 실행하거나
+information_schema 데이터베이스의 PROCESSLIST 테이블을 조회해서 얻은 결과 데이터와 동일하다.
+- thread : 서버 내부 백그라운드 쓰레드 및 클라이언트 연결에 해당하는 포그라운드 스레드들에 대한 정보가 저장돼 있으며, 쓰레드별로 모니터링 및 과거 이벤트 데이터 보관 설정 여부도 확인할 수 있다.
+- tls_channel_status : 연결 인터페이스별 TLS(SSL) 속성 정보가 저장된다. 
+- user_defined_functions : 컴포넌트나 플러그인에 의해 자동으로 등록됐거나 CREATE FUNCTION 명령문에 의해 생성된 사용자 정의 함수들에 대한 정보가 저장된다.
+
+
+## Performance 스키마 설정
+명시적으로 Performance 스키마 기능의 활성화 여부를 제어하고 싶은 경우에는 MySQL 설정 파일에 옵션을 추가해야한다.
+```sql
+
+-- Performance 스키마 
+[mysqld]
+performance_schema=OFF
+    
+
+    
+SHOW GLOBAL VARIABLES LIKE 'performance_schema';
+```
+사용자는 Performance 스키마에 대해서 두 가지 부분으로 나눠서 설정할 수 있다.
+- 메모리 사용량 설정
+- 데이터 수집 및 저장 설정
+
+Performance 스키마는 수집한 데이터들을 모두 메모리에 저장하므로 Performance 스키마가 MySQL에 영향을 줄 정도 메모리를 사용하지 않도록 제한하는 것이 좋다.
+또한 Performance 스키마를 수집 가능한 모든 이벤트에 대해서 수집하도록 하는 것보다 사용자가 필요로하는 이벤트들에 대해서만 수집하도록 설정하는 편이 MySQL 오버헤드를 줄이고 성능 저하를 유발하지 않는다.
+
+
+## 메모리 사용량 설정
+Performance 스키마에 저장되는 데이터양은 Performance 스키마의 메모리 사용량과 직결되며, 따라서 메모리 사용량 설정은 곧 얼마만큼의 데이터를 저장할 것인지를 설정하는 것이다.
+MySQL 서버에서는 Performance 스키마가 사용하는 메모리의 양을 제어할 수 있는 시스템 변수들을 제공한다. -1 또는 0, 0보다 큰 값들로 설정될 수 있다.
+
+```sql
+SELECT VARIABLE_NAME, VARIABLE_VALUE
+FROM performance_schema.global_variables
+WHERE VARIABLE_NAME LIKE `%performance_schema%`
+AND VARIABLE_NAME NOT IN ('performance_schema', 'performance_schema_show_processlist');
+```
