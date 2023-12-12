@@ -283,3 +283,186 @@ CALL sys.ps_setup_enable_instrument('wait');
 CALL sys.ps_setup_enable_thread(123);
 
 ```
+
+## Performance, Sys 활용 예제
+### 호스트 접속 이력 확인 
+```sql
+SELECT * FROM performance_schema.hosts;
+```
+### 미사용 DB 계정 확인
+```sql
+SELECT DISTINCT m_u.user, m_u.host
+FROM mysql.user m_u
+    
+LEFT JOIN performance_schema.accounts ps_a
+    ON m_u.user = ps_a.user AND ps_a.host = m_u.host
+LEFT JOIN information_schema.views is_v
+    ON is_v.definer = CONCAT(m_u.User, '@', m_u.Host) AND is_v.security_type = 'DEFINER'
+LEFT JOIN information_schema.routines is_r 
+    ON is_r.definer = CONCAT(m_u.User, '@', m_u.Host) AND is_r.security_type = 'DEFINER' 
+LEFT JOIN information_schema.events is_e 
+    ON is_e.definer = CONCAT(m_u.user, '@', m_u.host) 
+LEFT JOIN information_schema.triggers is_t 
+    ON is_t.definer = CONCAT(m_u.user, '@', m_u.host) 
+
+WHERE ps_a.user IS NULL
+  AND is_v.definer IS NULL
+  AND is_r.definer IS NULL
+  AND is_e.definer IS NULL
+  AND is_t.definer IS NULL
+ORDER BY m_u.user, m_u.host; 
+
+```
+
+### MySQL 총 메모리 확인
+```sql
+SELECT * FROM sys.memory_global_total;
+```
+
+### 미사용 인덱스 확인
+```sql
+SELECT *
+FROM sys.schema_unused_indexes;
+```
+
+### 중복된 인덱스 확인
+```sql
+SELECT * FROM sys.schema_redundant_indexes LIMIT 1;
+```
+
+### I/O 요청이 많은 테이블 목록 확인
+```sql
+SELECT * FROM sys.io_global_by_file_by_bytes WHERE file LIKE '%ibd';
+```
+
+### 테이블별 작업량 통계 확인
+```sql
+SELECT table_schema, table_name, rows_fetched, rows_inserted, rows_updated, rows_deleted, io_read, io_write
+FROM sys.schema_table_statistics
+WHERE table_schema NOT IN ('mysql', 'performance_schema', 'sys');
+```
+
+### AUTO-INCREMENT 컬럼 사용량 확인
+```sql
+SELECT table_schema, table_name, column_name, auto_increment as "current_value", max_value, 
+       ROUND(auto_increment_ratio * 100, 2) as "usage_ratio"
+FROM sys.schema_auto_increment_columns;
+```
+
+### 풀테이블 스캔 쿼리 확인 
+```sql
+SELECT db, query, exec_count,
+       sys.format_time(total_latency) as "formatted_total_latency",
+       rows_sent_avg, rows_examined_avg,
+       last_seen 
+FROM sys.x$statements_with_full_table_scans
+ORDER BY total_latency DESC
+```
+
+### 자주 실행되는 쿼리 목록 확인
+```sql
+SELECT db, exec_count, query
+FROM sys.statement_analysis
+ORDER BY exec_count DESC;
+```
+
+### 실행 시간이 긴 쿼리 목록 확인
+```sql
+SELECT query, exec_count, sys.format_time(avg_latency) as "formatted_avg_latency"
+       rows_sent_avg, rows_examined_avg, last_seen
+FROM sys.x$statement_analysis
+ORDER BY avg_latency DESC;
+```
+
+### 임시 테이블을 생성하는 쿼리 목록 확인
+```sql
+SELECT * FROM sys.statements_with_temp_tables LIMIT 10;
+```
+
+### 트랜잭션이 활성 상태인 커넥션에서 실행한 쿼리 내역 확인
+다음 쿼리를 사용해서 종료되지 않고 아직 열린 채로 남아 있는 트랜잭션에서 실행한 쿼리 내역을 확인할 수 있다. 
+```sql
+SELECT ps_t.processlist_id, ps_esh.thread_id,
+       CONCAT(ps_t.PROCESSLIST_USER,'@',ps_t.PROCESSLIST_HOST) AS "db_account",
+       ps_esh.event_name, ps_esh.SQL_TEXT,
+       sys.format_time(ps_esh.TIMER_WAIT) AS `duration`,
+       DATE_SUB(NOW(), INTERVAL (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='UPTIME') - ps_esh.TIMER_START*10e-13 second) AS `start_time`,
+       DATE_SUB(NOW(), INTERVAL (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='UPTIME') - ps_esh.TIMER_END*10e-13 second) AS `end_time`
+FROM performance_schema.threads ps_t
+INNER JOIN performance_schema.events_transactions_current ps_etc
+        ON ps_etc.thread_id=ps_ t.thread_id
+INNER JOIN performance_schema.events_statements_history ps_esh
+        ON ps_esh.NESTING_EVENT_ID=ps_ etc.event_id
+WHERE ps_etc.STATE='ACTIVE'
+  AND ps_esh.MYSQL_ERRNO=0
+ORDER BY ps_t.processlist_id, ps_esh.TIMER_START;
+```
+
+### 특정 세션에서 실행한 쿼리들의 전체 내역 확인
+```sql
+SELECT ps_t.processlist_id, ps_esh.thread_id,
+       CONCAT(ps_t.PROCESSLIST_USER,'@',ps_t.PROCESSLIST_HOST) AS "db_account",
+       ps_esh.event_name, ps_esh.SQL_TEXT,
+       DATE_SUB(NOW(), INTERVAL (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='UPTIME') - ps_esh.TIMER_START*10e-13 second) AS `start_time`,
+       DATE_SUB(NOW(), INTERVAL (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='UPTIME') - ps_esh.TIMER_END*10e-13 second) AS `end_time`,
+       sys.format_time(ps_esh.TIMER_WAIT) AS `duration`
+FROM performance_schema.events_statements_history ps_esh
+INNER JOIN performance_schema.threads ps_t
+    ON ps_t.thread_id=ps_esh.thread_id
+WHERE ps_t.processlist_id=8 -- 보고 싶은 세션의  PROCESSLIST ID 값을 확인하고 던지면 된다. 
+  AND ps_esh.SQL_TEXT IS NOT NULL
+  AND ps_esh.MYSQL_ERRNO=0
+ORDER BY ps_esh.TIMER_START
+```
+### 쿼리 프로파일링
+쿼리가 MySQL 서버에서 처리될 때 처리 단계별로 시간이 어느 정도 소요됐는지 확인할 수 있다면 쿼리의 성능을 개선하는 데 도움이 될 것이다. `SHOW PROFILE`, `SHOW PROFILES`를 사용하거나
+Performance 스키마로 확인할 수 있다. 
+
+```sql
+-- 설정 변경
+CALl sys.ps_setup_save(10);
+
+UPDATE performance_schema.setup_instruments
+  SET ENABLED = 'YES', TIMED = 'YES'
+WHERE NAME LIKE '%statement/%' OR NAME LIKE '%stage/%';
+
+UPDATE performance_schema.setup_consumers
+  SET ENABLED = 'YES'
+WHERE NAME LIKE '%events_statements_%' OR NAME LIKE '%events_stages_%';
+
+
+-- 프로파일링 대상 쿼리 실행
+SELECT * FROm DB1.tb1 WHERE id = 200725;
+
+-- 실행된 쿼리에 매핑되는 이벤트 ID 확인
+SELECT EVENT_ID, SQL_TEXT, sys.format_time(TIMER_WAIT) as "Duration"
+FROM performance_schema.events_statements_history_long
+WHERE SQL_TEXT LIKE '%200725%';
+
+
+-- EVENT ID로 조회
+SELECT EVENT_NAME AS "Stage"
+sys.format_time(TIMER_WAIT) as "Duration"
+FROM performance_schema.events_stages_history_long
+WHERE NESTING_EVENT_ID = 4011
+ORDER BY TIMER_START;
+```
+
+### 메타데이터 락 대기 확인
+ALTER TABLE로 테이블 스키마를 변경할 때 변경 대상에 대해서 메타 데이터 락을 점유하고 있는 경우 ALTER TABLE은 진행하지 못하고 대기하게 된다.
+이 경우 `schema_table_lock_waits`에서 호가인할 수 있다.
+```sql
+SELECT *
+FROM sys.schema_table_lock_waits
+WHERE waiting_thread_id != schema_table_lock_waits.blocking_thread_id;
+
+-- waiting_ 은 대기 blocking_ 은 대기하게 만든 세션과 관련된 정보를 보여준다. sql_ 로 시작하는 컬럼에는 메타데이터 락을 점유한 세션에서 실행 중인 쿼리
+-- 또는 세션 자체를 종료 시키는 쿼리 문이 표시된다. 따라서 필요한 경우 해당 쿼리들을 사용해서 점유된 메타데이터 락을 강제로 해제할 수는 있다.
+-- 강제로 종료할 경우 서비스에 영향을 줄 수 있다.
+```
+
+### 데이터 락 대기 확인
+```sql
+SELECT * 
+FROM sys.innodb_lock_waits;
+```
