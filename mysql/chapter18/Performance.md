@@ -145,7 +145,7 @@ information_schema 데이터베이스의 PROCESSLIST 테이블을 조회해서 �
 - user_defined_functions : 컴포넌트나 플러그인에 의해 자동으로 등록됐거나 CREATE FUNCTION 명령문에 의해 생성된 사용자 정의 함수들에 대한 정보가 저장된다.
 
 
-## Performance 스키마 설정
+### Performance 스키마 설정
 명시적으로 Performance 스키마 기능의 활성화 여부를 제어하고 싶은 경우에는 MySQL 설정 파일에 옵션을 추가해야한다.
 ```sql
 
@@ -165,7 +165,7 @@ Performance 스키마는 수집한 데이터들을 모두 메모리에 저장하
 또한 Performance 스키마를 수집 가능한 모든 이벤트에 대해서 수집하도록 하는 것보다 사용자가 필요로하는 이벤트들에 대해서만 수집하도록 설정하는 편이 MySQL 오버헤드를 줄이고 성능 저하를 유발하지 않는다.
 
 
-## 메모리 사용량 설정
+### 메모리 사용량 설정
 Performance 스키마에 저장되는 데이터양은 Performance 스키마의 메모리 사용량과 직결되며, 따라서 메모리 사용량 설정은 곧 얼마만큼의 데이터를 저장할 것인지를 설정하는 것이다.
 MySQL 서버에서는 Performance 스키마가 사용하는 메모리의 양을 제어할 수 있는 시스템 변수들을 제공한다. -1 또는 0, 0보다 큰 값들로 설정될 수 있다.
 
@@ -174,4 +174,112 @@ SELECT VARIABLE_NAME, VARIABLE_VALUE
 FROM performance_schema.global_variables
 WHERE VARIABLE_NAME LIKE `%performance_schema%`
 AND VARIABLE_NAME NOT IN ('performance_schema', 'performance_schema_show_processlist');
+```
+
+Performance 스키마의 메모리 사용량 관련 시스템 변수들은 테이블에 저장되는 데이터 수를 제한하는 변수들과 performance 스키마에서 데이터를 수집할 수 있는 
+이벤트 클래스 수 및 이벤트 클래스들의 실제 구현체인 인스턴스들의 수를 제한하는 변수들로 나뉜다. 테이블에 저장되는 데이터의 개수를 제한하는 변수는 아래와 같다.
+
+- performance_schema_account_size
+- performance_schema_digests_size
+- performance_schema_error_size
+- performance_schema_events_waits_history_size
+- performance_schema_events_waits_history_long_size
+- performance_schema_events_stages_history_size
+- performance_schema_events_stages_history_long_size
+- performance_schema_events_statements_history_size
+- performance_schema_events_statements_history_long_size
+- performance_schema_events_transactions_history_size
+- performance_schema_events_transactions_history_long_size
+- performance_schema_hosts_size
+- performance_schema_session_connect_attrs_size
+- performance_schema_setup_actors_size
+- performance_schema_setup_objects_size
+- performance_schema_users_size
+
+Performance 스키마에서 데이터를 수집할 수 있는 이벤트 클래스들의 개수 및 인스턴스의 수를 제한하는 변수는 아래와 같다.
+
+- performance_schema_max_cond_classes
+- performance_schema_max_cond_instances
+- performance_schema_max_file_classes
+- performance_schema_max_file_instances
+- performance_schema_max_mutex_classes
+- performance_schema_max_mutex_instances
+- performance_schema_max_rwlock_classes
+- performance_schema_max_rwlock_instances
+- performance_schema_max_socket_classes
+- performance_schema_max_socket_instances
+- performance_schema_max_thread_classes
+- performance_schema_max_thread_instances
+- performance_schema_max_memory_classes
+- performance_schema_max_stage_classes
+- performance_schema_max_statement_classes
+- performance_schema_max_prepared_statements_instances
+- performance_schema_max_program_instances
+- performance_schema_max_digest_length
+
+                 ...
+
+- performance_schema_max_index_stat
+
+### 데이터 수집 및 저장 설정
+사용자는 Performance 스키마가 어떤 대상에 대해서 모니터링하며 어떤 이벤트들에 대한 데이터를 수집하고 또 수집한 데이터를 어느 정도 상세한 수준으로 저장하게 할 것인지를
+제어할 수 있다. Performance 스키마는 생산자-소비자 방식으로 구현되어 내부적으로 데이터를 수집하는 부분과 저장하는 부분으로 나뉘어 동작한다. 사용자는 수집 부분과 관련해서
+모니터링 대상들과 수집 대상 이벤트들을 설정할 수 있다. 
+
+
+## Sys Schema
+Sys는 Performance 스키마에 저장된 데이터를 참조하므로 Sys 스키마를 제대로 사용하기 위해서는 Performance가 활성화돼 있어야 한다. Sys는 Performance 스키마의 어려운 사용법을
+해결해주는 솔루션이다. Sys는 Performance의 불편한 사용성을 보와하고자 도입됐으며, 5.7.7부터 내장된 형태로 제공된다.
+```sql
+[mysqld]
+performance_schema=ON
+```
+Performance에는 데이터 수집 및 저장과 관련해서 기본 설정이 존재하므로 Performance가 활성화돼 있으면 해당 설정을 바탕으로 데이터가 수집 및 저장되고, 사용자는 Sys 스키마를 통해서 Performance 스키마에 저장돼 있는
+데이터를 바로 조회해볼 수 있다. 
+
+```sql
+-- Performance 스키마 현재 설정 확인 
+-- Performance 스키마에서 비활성화된 설정 전체를 확인
+CALL sys.ps_setup_show_disabled(TRUE, TRUE);
+
+-- Performance 스키마에서 비활성화된 저장 레벨 설정을 확인
+CALL sys.ps_setup_show_disabled_consumers();
+
+-- // Performance 스키마에서 비활성화된 수집 이벤트들을 확인
+CALL sys.ps_setup_show_disabled_instruments();
+
+-- // Performance 스키마에서 활성화된 설정 전체를 확인
+CALL sys.ps_setup_show_enabled(TRUE, TRUE);
+
+-- // Performance 스키마에서 활성화된 저장 레벨 설정을 확인
+CALL sys.ps_setup_show_enabled_consumers();
+
+-- // Performance 스키마에서 활성화된 수집 이벤트들을 확인
+CALL sys.ps_setup_show_enabled_instruments();
+
+-- Performance 스키마 설정 변경
+-- // Performance 스키마에서 백그라운드 스레드들에 대해 모니터링을 비활성화
+CALL sys.ps_setup_disable_background_threads();
+
+-- // Performance 스키마에서 'wait' 문자열이 포함된 저장 레벨들을 모두 비활성화
+CALL sys.ps_setup_disable_consumer('wait');
+
+-- // Performance 스키마에서 'wait' 문자열이 포함된 수집 이벤트들을 모두 비활성화
+CALL sys.ps_setup_disable_instrument('wait');
+
+-- // Performance 스키마에서 특정 스레드에 대해 모니터링을 비활성화
+CALL sys.ps_setup_disable_thread(123);
+
+-- // Performance 스키마에서 백그라운드 스레드들에 대해 모니터링을 활성화
+CALL sys.ps_setup_enable_background_threads();
+
+-- // Performance 스키마에서 'wait' 문자열이 포함된 저장 레벨들을 모두 활성화
+CALL sys.ps_setup_enable_consumer('wait');
+
+-- // Performance 스키마에서 'wait' 문자열이 포함된 수집 이벤트들을 모두 활성화
+CALL sys.ps_setup_enable_instrument('wait');
+
+-- // Performance 스키마에서 특정 스레드에 대해 모니터링 활성화
+CALL sys.ps_setup_enable_thread(123);
+
 ```
